@@ -1,0 +1,180 @@
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
+from app.database import connect_db, disconnect_db
+from app.routes.auth import router as auth_router
+from app.routes.categories import router as categories_router
+from app.routes.products import router as products_router
+from app.routes.subscriptions import router as subscriptions_router
+from app.routes.cart import router as cart_router
+from app.routes.files import router as files_router
+from app.routes.payments import router as payments_router
+from app.routes.webhooks import router as webhooks_router
+from app.middleware.mobile_auth import (
+    MobileAuthMiddleware,
+    RateLimitMiddleware,
+    RequestLoggingMiddleware
+)
+
+import logging
+import time
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Starting up ZipoHub API...")
+    await connect_db()
+    yield
+    logger.info("Shutting down ZipoHub API...")
+    await disconnect_db()
+
+app = FastAPI(
+    title="ZipoHub API",
+    version="1.0.0",
+    description="ZipoHub E-commerce API with Supabase Authentication",
+    lifespan=lifespan
+)
+
+# Add middleware in order (last added = first executed)
+# Request Logging Middleware
+app.add_middleware(RequestLoggingMiddleware)
+
+# Rate Limiting Middleware
+app.add_middleware(RateLimitMiddleware, requests_per_minute=100)
+
+# Mobile Auth Middleware
+app.add_middleware(
+    MobileAuthMiddleware,
+    excluded_paths=[
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+        "/api/auth/signup",
+        "/api/auth/login",
+        "/api/auth/refresh",
+        "/api/auth/mobile/signup",
+        "/api/auth/mobile/login",
+        "/api/auth/mobile/refresh",
+        "/api/auth/password-reset/request",
+        "/api/auth/password-reset/verify",
+        "/api/auth/password-reset/verify-otp",
+        "/api/auth/password-reset/complete",
+        "/api/auth/confirm",
+        "/api/auth/resend-verification",
+        "/api/auth/status",
+        "/api/auth/logout",
+        "/api/auth/mobile/status",
+        "/api/auth/mobile/logout",
+        "/api/categories",
+        "/api/subcategories",
+        "/api/categories-tree",
+        "/api/products",
+        "/api/products/featured",
+        "/api/products/stats",
+        "/api/subscription-plans",
+        "/api/webhooks/paystack",
+        "/api/webhooks/paystack/health",
+        "/health",
+        "/",
+        "/api/auth/"
+    ]
+)
+
+# CORS Middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, specify actual domains
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Requested-With",
+        "Accept",
+        "Origin",
+        "User-Agent"
+    ],
+)
+
+# Exception handler for mobile-friendly error responses
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Global exception: {str(exc)}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal Server Error",
+            "message": "An unexpected error occurred",
+            "timestamp": time.time()
+        }
+    )
+
+# Include routers
+app.include_router(auth_router, prefix="/api/auth", tags=["authentication"])
+app.include_router(categories_router, prefix="/api", tags=["categories"])
+app.include_router(products_router, prefix="/api", tags=["products"])
+app.include_router(subscriptions_router, prefix="/api", tags=["subscriptions"])
+app.include_router(payments_router, prefix="/api", tags=["payments"])
+app.include_router(cart_router, prefix="/api", tags=["cart"])
+app.include_router(files_router, prefix="/api", tags=["files"])
+app.include_router(webhooks_router, prefix="/api/webhooks", tags=["webhooks"])
+
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "timestamp": time.time(),
+        "version": "1.0.0"
+    }
+
+@app.get("/")
+async def root():
+    return {
+        "message": "ZipoHub API is running",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/health"
+    }
+
+# API Info endpoint for mobile apps
+@app.get("/api/info")
+async def api_info():
+    return {
+        "name": "ZipoHub API",
+        "version": "1.0.0",
+        "endpoints": {
+            "auth": "/api/auth",
+            "categories": "/api/categories",
+            "subcategories": "/api/subcategories",
+            "categories_tree": "/api/categories-tree",
+            "products": "/api/products",
+            "featured_products": "/api/products/featured",
+            "my_products": "/api/products/my-products",
+            "product_stats": "/api/products/stats",
+            "subscription_plans": "/api/subscription-plans",
+            "cart": "/api/cart",
+            "add_to_cart": "/api/cart/items",
+            "cart_summary": "/api/cart/summary",
+            "health": "/health",
+            "docs": "/docs"
+        },
+        "features": [
+            "Supabase Authentication",
+            "JWT Tokens",
+            "Mobile Optimized",
+            "Rate Limited",
+            "CORS Enabled",
+            "Categories & Subcategories",
+            "Product Management",
+            "Product Search & Filtering",
+            "Pagination & Sorting",
+            "Featured Products",
+            "Shopping Cart",
+            "Cart Management"
+        ]
+    }

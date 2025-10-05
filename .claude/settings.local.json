@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uvicorn:*)",
+      "Bash(source:*)",
+      "Bash(python3:*)",
+      "Bash(./venv/Scripts/python.exe -m prisma:*)",
+      "Bash(./venv/Scripts/python.exe -c \"import prisma; print(''Prisma imported successfully'')\")",
+      "Bash(./venv/Scripts/python.exe -m pip install:*)",
+      "Bash(./venv/Scripts/python.exe -m uvicorn app.main:app --reload)",
+      "Bash(./venv/Scripts/python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8080)",
+      "Bash(curl:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -1,0 +1,566 @@
+generator client {
+  provider = "prisma-client-py"
+}
+
+datasource db {
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  directUrl         = env("DIRECT_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+}
+
+model categories {
+  id            String          @id @default(uuid()) @db.Uuid
+  name          String          @unique @db.VarChar(255)
+  description   String?
+  created_at    DateTime        @default(now()) @db.Timestamp(6)
+  updated_at    DateTime        @default(now()) @db.Timestamp(6)
+  deleted_at    DateTime?       @db.Timestamp(6)
+  products      products[]
+  subcategories subcategories[]
+}
+
+model products {
+  id                      String              @id @default(uuid()) @db.Uuid
+  name                    String
+  price                   Decimal             @db.Decimal(10, 2)
+  country                 String
+  categoryId              String              @db.Uuid
+  subCategoryId           String              @db.Uuid
+  sellerId                String              @db.Uuid
+  description             String?
+  condition               ProductCondition?
+  photos                  String[]
+  fields                  Json?
+  currency                SupportedCurrencies @default(GHS)
+  quantity                Int                 @default(0)
+  allowPurchaseOnPlatform Boolean             @default(false)
+  created_at              DateTime?           @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime?           @default(now()) @db.Timestamptz(6)
+  featured                Boolean             @default(false)
+  cartItems               CartItem[]
+  DiscountOnProduct       DiscountOnProduct[]
+  orderItems              OrderItem[]
+  productPurchases        ProductPurchase[]
+  category                categories          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  user                    users               @relation(fields: [sellerId], references: [user_id], onDelete: Cascade)
+  subCategory             subcategories       @relation(fields: [subCategoryId], references: [id], onDelete: Cascade)
+}
+
+model subcategories {
+  id          String     @id @default(uuid()) @db.Uuid
+  category_id String     @db.Uuid
+  name        String     @db.VarChar(255)
+  description String?
+  created_at  DateTime   @default(now()) @db.Timestamp(6)
+  updated_at  DateTime   @default(now()) @db.Timestamp(6)
+  deleted_at  DateTime?  @db.Timestamp(6)
+  products    products[]
+  categories  categories @relation(fields: [category_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model users {
+  user_id              String                  @id @db.Uuid
+  name                 String
+  email                String                  @unique
+  phone_number         String?
+  country              String?
+  city                 String?
+  address              String?
+  business_name        String?
+  business_logo        String?
+  business_description String?
+  verified             Boolean?                @default(false)
+  social_links         Json?
+  role                 usertype?               @default(CUSTOMER)
+  created_at           DateTime                @default(now()) @db.Timestamp(6)
+  updated_at           DateTime                @default(now()) @db.Timestamp(6)
+  deleted_at           DateTime?               @db.Timestamp(6)
+  products             products[]
+  Cart                 Cart[]
+  Order                Order[]
+  agent                Agent?                  @relation("AgentProfile")
+  AgentRegisteredSeller AgentRegisteredSeller[] @relation("RegisteredByAgent")
+  AgentSession          AgentSession[]          @relation("AgentSessionsAsSeller")
+  sellerAnalytics      SellerAnalytics?
+
+}
+
+model SellerAnalytics {
+  id                    String    @id @default(uuid()) @db.Uuid
+  sellerId              String    @unique @db.Uuid
+  totalSales            Decimal   @default(0) @db.Decimal(10, 2)
+  totalOrders           Int       @default(0)
+  totalCustomers        Int       @default(0)
+  averageOrderValue     Decimal   @default(0) @db.Decimal(10, 2)
+  topSellingProductId   String?   @db.Uuid
+  lastSaleDate          DateTime?
+  monthlyRevenue        Json?
+  customerRetentionRate Float     @default(0)
+  updatedAt             DateTime  @updatedAt
+  seller                users     @relation(fields: [sellerId], references: [user_id], onDelete: Cascade)
+
+  @@index([sellerId])
+}
+
+model Cart {
+  id             String              @id @default(uuid()) @db.Uuid
+  userId         String              @unique @db.Uuid
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  currency       SupportedCurrencies @default(GHS)
+  discountAmount Decimal             @default(0) @db.Decimal(10, 2)
+  itemCount      Int                 @default(0)
+  subtotal       Decimal             @default(0) @db.Decimal(10, 2)
+  tax            Decimal             @default(0) @db.Decimal(10, 2)
+  total          Decimal             @default(0) @db.Decimal(10, 2)
+  user           users               @relation(fields: [userId], references: [user_id], onDelete: Cascade)
+  items          CartItem[]
+
+  @@index([userId])
+}
+
+model CartItem {
+  id          String   @id @default(uuid()) @db.Uuid
+  cartId      String   @db.Uuid
+  productId   String   @db.Uuid
+  quantity    Int      @default(1)
+  price       Decimal  @db.Decimal(10, 2)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  condition   String?
+  image       String?
+  location    String?
+  maxQuantity Int?
+  sellerId    String?
+  sellerName  String?
+  title       String?
+  cart        Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product     products @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, productId])
+  @@index([cartId])
+  @@index([productId])
+}
+
+model Order {
+  id               String              @id @default(uuid()) @db.Uuid
+  userId           String              @db.Uuid
+  subtotal         Decimal             @db.Decimal(10, 2)
+  discountAmount   Decimal             @default(0) @db.Decimal(10, 2)
+  tax              Decimal             @default(0) @db.Decimal(10, 2)
+  total            Decimal             @db.Decimal(10, 2)
+  status           OrderStatus         @default(PENDING)
+  currency         SupportedCurrencies @default(GHS)
+  shippingAddress  Json?
+  trackingNumber   String?
+  paymentMethod    String?
+  paymentGateway   PaymentGateway?
+  paymentStatus    PaymentStatus       @default(PENDING)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  user             users               @relation(fields: [userId], references: [user_id], onDelete: Cascade)
+  appliedDiscounts OrderDiscount[]
+  items            OrderItem[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id         String   @id @default(uuid()) @db.Uuid
+  orderId    String   @db.Uuid
+  productId  String   @db.Uuid
+  quantity   Int
+  price      Decimal  @db.Decimal(10, 2)
+  title      String
+  image      String?
+  condition  String?
+  location   String?
+  sellerId   String   @db.Uuid
+  sellerName String
+  createdAt  DateTime @default(now())
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product    products @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([sellerId])
+}
+
+model Discount {
+  id                String              @id @default(uuid()) @db.Uuid
+  code              String              @unique
+  description       String?
+  percentage        Float?
+  fixedAmount       Decimal?            @db.Decimal(10, 2)
+  minimumAmount     Decimal?            @db.Decimal(10, 2)
+  currency          SupportedCurrencies @default(GHS)
+  startDate         DateTime
+  endDate           DateTime
+  usageLimit        Int?
+  usageCount        Int                 @default(0)
+  status            DiscountStatus      @default(ENABLED)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  appliedOrders     OrderDiscount[]     @relation("OrderDiscounts")
+  discountProducts  DiscountOnProduct[]
+}
+
+model DiscountOnProduct {
+  id         String   @id @default(uuid()) @db.Uuid
+  discountId String   @db.Uuid
+  productId  String   @db.Uuid
+  createdAt  DateTime @default(now())
+  discount   Discount @relation(fields: [discountId], references: [id], onDelete: Cascade)
+  product    products @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([discountId, productId])
+  @@index([discountId])
+  @@index([productId])
+}
+
+model OrderDiscount {
+  id          String    @id @default(uuid()) @db.Uuid
+  orderId     String    @db.Uuid
+  discountId  String?   @db.Uuid
+  code        String
+  percentage  Float
+  amount      Decimal   @db.Decimal(10, 2)
+  description String?
+  appliedAt   DateTime  @default(now())
+  discount    Discount? @relation("OrderDiscounts", fields: [discountId], references: [id])
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([discountId])
+}
+
+model ProductPurchase {
+  id           String   @id @default(uuid()) @db.Uuid
+  productId    String   @db.Uuid
+  buyerId      String   @db.Uuid
+  sellerId     String   @db.Uuid
+  quantity     Int
+  totalAmount  Decimal  @db.Decimal(10, 2)
+  purchaseDate DateTime @default(now())
+  product      products @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([buyerId])
+  @@index([sellerId])
+}
+
+model Agent {
+  id                      String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id                 String                  @unique @db.Uuid
+  agent_code              String                  @unique
+  commission_rate         Float?                  @default(0.1)
+  total_earnings          Decimal?                @default(0) @db.Decimal(10, 2)
+  available_balance       Decimal?                @default(0) @db.Decimal(10, 2)
+  bank_name               String?
+  account_number          String?
+  account_name            String?
+  is_active               Boolean?                @default(true)
+  created_at              DateTime?               @default(now()) @db.Timestamp(6)
+  updated_at              DateTime?               @default(now()) @updatedAt @db.Timestamp(6)
+  user                    users                   @relation("AgentProfile", fields: [user_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction)
+  agent_activities        AgentActivity[]
+  registered_sellers      AgentRegisteredSeller[]
+  sessions                AgentSession[]          @relation("AgentSessions")
+  commission_transactions CommissionTransaction[]
+  referral_links          AgentReferralLinks?
+
+  @@index([agent_code], map: "idx_agent_code")
+  @@index([user_id], map: "idx_agent_user_id")
+}
+
+model AgentRegisteredSeller {
+  id            String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  agent_id      String    @db.Uuid
+  seller_id     String    @db.Uuid
+  registered_at DateTime? @default(now()) @db.Timestamp(6)
+  is_active     Boolean?  @default(true)
+  agent         Agent     @relation(fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  seller        users     @relation("RegisteredByAgent", fields: [seller_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([agent_id, seller_id])
+  @@index([agent_id], map: "idx_agent_registered_seller_agent")
+  @@index([seller_id], map: "idx_agent_registered_seller_seller")
+}
+
+model AgentActivity {
+  id            String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  agent_id      String            @db.Uuid
+  activity_type agentactivitytype
+  description   String
+  metadata      Json?
+  created_at    DateTime?         @default(now()) @db.Timestamp(6)
+  is_read       Boolean?          @default(false)
+  agent         Agent             @relation(fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([agent_id], map: "idx_agent_activity_agent")
+  @@index([created_at], map: "idx_agent_activity_created")
+  @@index([agent_id, is_read, created_at(sort: Desc)], map: "idx_agent_activity_read_status")
+}
+
+model CommissionTransaction {
+  id               String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  agent_id         String                    @db.Uuid
+  amount           Decimal                   @db.Decimal(10, 2)
+  transaction_type commissiontransactiontype
+  reference_id     String?
+  reference_type   commissionreferencetype
+  status           commissionstatus?         @default(PENDING)
+  created_at       DateTime?                 @default(now()) @db.Timestamp(6)
+  processed_at     DateTime?                 @db.Timestamp(6)
+  agent            Agent                     @relation(fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([agent_id], map: "idx_commission_transaction_agent")
+  @@index([reference_id], map: "idx_commission_transaction_reference")
+}
+
+model AgentSession {
+  id            String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  agent_id      String    @db.Uuid
+  seller_id     String    @db.Uuid
+  session_token String    @unique
+  ip_address    String?
+  device_info   String?
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+  expires_at    DateTime  @db.Timestamp(6)
+  agent         Agent     @relation("AgentSessions", fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  seller        users     @relation("AgentSessionsAsSeller", fields: [seller_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([agent_id], map: "idx_agent_session_agent")
+  @@index([seller_id], map: "idx_agent_session_seller")
+  @@index([session_token], map: "idx_agent_session_token")
+}
+
+model agents {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id           String    @db.Uuid
+  agent_id          String
+  first_name        String
+  other_names       String
+  phone             String
+  facebook_url      String?
+  twitter_url       String?
+  tiktok_url        String?
+  snapchat_username String?
+  status            String?   @default("pending_verification")
+  created_at        DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime? @default(now()) @db.Timestamptz(6)
+}
+
+model notes {
+  id         BigInt   @id @default(autoincrement())
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  body       String?
+}
+
+model AgentReferralLinks {
+  id               String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  agent_id         String?               @unique(map: "unique_agent_referral") @db.Uuid
+  referral_code    String?               @unique
+  referral_url     String?
+  click_count      Int?                  @default(0)
+  conversion_count Int?                  @default(0)
+  is_active        Boolean?              @default(true)
+  created_at       DateTime?             @db.Timestamp(6)
+  updated_at       DateTime?             @updatedAt @db.Timestamp(6)
+  agent            Agent?                @relation(fields: [agent_id], references: [user_id], onDelete: NoAction, onUpdate: NoAction)
+  clicks           ReferralClicks[]
+  conversions      ReferralConversions[]
+
+  @@map("agent_referral_links")
+}
+
+model ReferralClicks {
+  id               String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  referral_link_id String?             @db.Uuid
+  agent_id         String?
+  clicked_at       DateTime?           @db.Timestamp(6)
+  ip_address       String?
+  user_agent       String?
+  referral_link    AgentReferralLinks? @relation(fields: [referral_link_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("referral_clicks")
+}
+
+model ReferralConversions {
+  id                String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  referral_link_id  String?             @db.Uuid
+  agent_id          String?
+  seller_id         String?
+  seller_email      String?
+  converted_at      DateTime?           @db.Timestamp(6)
+  commission_earned Decimal?            @db.Decimal(10, 2)
+  referral_link     AgentReferralLinks? @relation(fields: [referral_link_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("referral_conversions")
+}
+
+enum SubscriptionTier {
+  LEVEL1
+  LEVEL2
+  LEVEL3
+}
+
+enum SupportedCurrencies {
+  USD
+  GHS
+}
+
+enum REGION {
+  GHANA
+  INTERNATIONAL
+}
+
+enum SubscriptionIntervals {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  BIANNUALLY
+  ANNUALLY
+}
+
+enum ProductCondition {
+  NEW
+  USED
+  REFURBISHED
+}
+
+enum PaymentGateway {
+  STRIPE
+  PAYSTACK
+}
+
+enum NotificationType {
+  SUCCESS
+  INFO
+  WARNING
+  ERROR
+}
+
+enum DiscountStatus {
+  ENABLED
+  DISABLED
+  EXPIRED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  CANCELLED
+}
+
+enum EventType {
+  PRODUCT_LOW_STOCK
+  PAYMENT_RECEIVED
+  NEW_CUSTOMER
+  SUBSCRIPTION_EXPIRING
+  PRODUCT_REVIEW
+  DISCOUNT_EXPIRING
+  INVENTORY_UPDATE
+  CUSTOMER_INQUIRY
+}
+
+enum EventPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum EventStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  DISMISSED
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+
+enum agentaccesslevel {
+  BASIC
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum agentactivitytype {
+  SELLER_REGISTRATION
+  SUBSCRIPTION_PURCHASE
+  LOGIN_AS_SELLER
+  COMMISSION_EARNED
+  WITHDRAWAL_REQUEST
+  PROFILE_UPDATE
+}
+
+enum commissionreferencetype {
+  SALE
+  SUBSCRIPTION
+  REGISTRATION
+  OTHER
+}
+
+enum commissionstatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REVERSED
+}
+
+enum commissiontransactiontype {
+  EARNING
+  WITHDRAWAL
+  ADJUSTMENT
+}
+
+enum usertype {
+  CUSTOMER
+  SELLER
+  AGENT
+  ADMIN
+}
+
+model SubscriptionPlan {
+  id                  String                @id @default(uuid()) @db.Uuid
+  name                String                @unique
+  description         String?
+  tier                SubscriptionTier
+  price               Decimal               @db.Decimal(10, 2)
+  currency            SupportedCurrencies   @default(GHS)
+  interval            SubscriptionIntervals
+  region              REGION
+  features            Json?
+  maxProducts         Int?
+  maxPhotosPerProduct Int?
+  commissionRate      Float?
+  isActive            Boolean               @default(true)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  @@index([tier])
+  @@index([region])
+  @@index([isActive])
+}
