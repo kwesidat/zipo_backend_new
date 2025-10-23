@@ -19,6 +19,7 @@ from app.middleware.mobile_auth import (
 
 import logging
 import time
+from mangum import Mangum
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -32,12 +33,18 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down ZipoHub API...")
     await disconnect_db()
 
+
+
+
+
 app = FastAPI(
     title="ZipoHub API",
     version="1.0.0",
     description="ZipoHub E-commerce API with Supabase Authentication",
     lifespan=lifespan
 )
+
+
 
 # Add middleware in order (last added = first executed)
 # Request Logging Middleware
