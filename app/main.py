@@ -11,10 +11,14 @@ from app.routes.cart import router as cart_router
 from app.routes.files import router as files_router
 from app.routes.payments import router as payments_router
 from app.routes.webhooks import router as webhooks_router
+from app.routes.discounts import router as discounts_router
+from app.routes.orders import router as orders_router
+from app.routes.notifications import router as notifications_router
+from app.routes.seller import router as seller_router
 from app.middleware.mobile_auth import (
     MobileAuthMiddleware,
     RateLimitMiddleware,
-    RequestLoggingMiddleware
+    RequestLoggingMiddleware,
 )
 
 import logging
@@ -24,6 +28,7 @@ import time
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up ZipoHub API...")
@@ -32,11 +37,12 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down ZipoHub API...")
     await disconnect_db()
 
+
 app = FastAPI(
     title="ZipoHub API",
     version="1.0.0",
     description="ZipoHub E-commerce API with Supabase Authentication",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Add middleware in order (last added = first executed)
@@ -80,8 +86,8 @@ app.add_middleware(
         "/api/webhooks/paystack/health",
         "/health",
         "/",
-        "/api/auth/"
-    ]
+        "/api/auth/",
+    ],
 )
 
 # CORS Middleware
@@ -96,9 +102,10 @@ app.add_middleware(
         "X-Requested-With",
         "Accept",
         "Origin",
-        "User-Agent"
+        "User-Agent",
     ],
 )
+
 
 # Exception handler for mobile-friendly error responses
 @app.exception_handler(Exception)
@@ -109,9 +116,10 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={
             "error": "Internal Server Error",
             "message": "An unexpected error occurred",
-            "timestamp": time.time()
-        }
+            "timestamp": time.time(),
+        },
     )
+
 
 # Include routers
 app.include_router(auth_router, prefix="/api/auth", tags=["authentication"])
@@ -120,17 +128,19 @@ app.include_router(products_router, prefix="/api", tags=["products"])
 app.include_router(subscriptions_router, prefix="/api", tags=["subscriptions"])
 app.include_router(payments_router, prefix="/api", tags=["payments"])
 app.include_router(cart_router, prefix="/api", tags=["cart"])
+app.include_router(orders_router, prefix="/api", tags=["orders"])
 app.include_router(files_router, prefix="/api", tags=["files"])
 app.include_router(webhooks_router, prefix="/api/webhooks", tags=["webhooks"])
+app.include_router(discounts_router, prefix="/api", tags=["discounts"])
+app.include_router(notifications_router, prefix="/api", tags=["notifications"])
+app.include_router(seller_router, prefix="/api", tags=["seller"])
+
 
 # Health check endpoint
 @app.get("/health")
 async def health_check():
-    return {
-        "status": "healthy",
-        "timestamp": time.time(),
-        "version": "1.0.0"
-    }
+    return {"status": "healthy", "timestamp": time.time(), "version": "1.0.0"}
+
 
 @app.get("/")
 async def root():
@@ -138,8 +148,9 @@ async def root():
         "message": "ZipoHub API is running",
         "version": "1.0.0",
         "docs": "/docs",
-        "health": "/health"
+        "health": "/health",
     }
+
 
 # API Info endpoint for mobile apps
 @app.get("/api/info")
@@ -160,8 +171,24 @@ async def api_info():
             "cart": "/api/cart",
             "add_to_cart": "/api/cart/items",
             "cart_summary": "/api/cart/summary",
+            "apply_discount_to_cart": "/api/cart/discount",
+            "buy_now": "/api/buy-now",
+            "checkout": "/api/checkout",
+            "verify_payment": "/api/verify-payment",
+            "my_orders": "/api/orders",
+            "discounts": "/api/discounts",
+            "my_discounts": "/api/discounts/my-discounts",
+            "notifications": "/api/notifications",
+            "notification_stats": "/api/notifications/stats",
+            "seller_dashboard": "/api/seller/dashboard",
+            "seller_analytics": "/api/seller/analytics",
+            "seller_events": "/api/seller/events",
+            "seller_invoices": "/api/seller/invoices",
+            "seller_top_products": "/api/seller/top-products",
+            "seller_orders": "/api/seller/orders",
+            "user_invoices": "/api/user/invoices",
             "health": "/health",
-            "docs": "/docs"
+            "docs": "/docs",
         },
         "features": [
             "Supabase Authentication",
@@ -175,6 +202,16 @@ async def api_info():
             "Pagination & Sorting",
             "Featured Products",
             "Shopping Cart",
-            "Cart Management"
-        ]
+            "Cart Management",
+            "Product Discounts",
+            "Discount Management",
+            "Buy Now Payments",
+            "Cart Checkout",
+            "Order Management",
+            "Payment Verification",
+            "Seller Dashboard",
+            "Seller Analytics",
+            "Seller Events & Notifications",
+            "Invoice Management",
+        ],
     }

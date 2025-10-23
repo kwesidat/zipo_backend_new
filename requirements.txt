@@ -8,3 +8,4 @@ bcrypt==4.0.1
 python-dotenv==1.0.0
 python-multipart==0.0.6
 httpx==0.24.1
+phonenumbers==8.13.26

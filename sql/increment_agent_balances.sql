@@ -1,8 +1,8 @@
 -- SQL function to safely increment agent balances
 -- This should be run in your Supabase SQL editor
 
-CREATE OR REPLACE FUNCTION increment_agent_balances(
-    p_user_id UUID,
+CREATE OR REPLACE FUNCTION increment_agent_balance(
+    p_agent_id UUID,
     p_amount DECIMAL(10, 2)
 )
 RETURNS JSON
@@ -18,7 +18,7 @@ BEGIN
         total_earnings = COALESCE(total_earnings, 0) + p_amount,
         available_balance = COALESCE(available_balance, 0) + p_amount,
         updated_at = NOW()
-    WHERE user_id = p_user_id
+    WHERE id = p_agent_id
     RETURNING json_build_object(
         'id', id,
         'user_id', user_id,
@@ -28,7 +28,7 @@ BEGIN
 
     -- Check if update was successful
     IF v_result IS NULL THEN
-        RAISE EXCEPTION 'Agent not found for user_id: %', p_user_id;
+        RAISE EXCEPTION 'Agent not found for agent_id: %', p_agent_id;
     END IF;
 
     RETURN v_result;
@@ -36,5 +36,5 @@ END;
 $$;
 
 -- Grant execute permission to authenticated users
-GRANT EXECUTE ON FUNCTION increment_agent_balances(UUID, DECIMAL) TO authenticated;
-GRANT EXECUTE ON FUNCTION increment_agent_balances(UUID, DECIMAL) TO service_role;
+GRANT EXECUTE ON FUNCTION increment_agent_balance(UUID, DECIMAL) TO authenticated;
+GRANT EXECUTE ON FUNCTION increment_agent_balance(UUID, DECIMAL) TO service_role;
