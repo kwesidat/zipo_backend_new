@@ -16,12 +16,8 @@ async def check_user_subscription(user_id: str) -> dict:
         - max_products: int or None
         - can_create_product: bool
     """
-    # Subscription plan limits mapping
-    SUBSCRIPTION_LIMITS = {
-        "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11": {"name": "Basic Seller", "max_products": 5},
-        "a1eebc99-9c0b-4ef8-bb6d-6bb9bd380a11": {"name": "Professional Seller", "max_products": 10},
-        "a2eebc99-9c0b-4ef8-bb6d-6bb9bd380a11": {"name": "Enterprise Seller", "max_products": None},  # Unlimited
-    }
+    # Subscription plan limits mapping - dynamically fetch from database instead of hardcoding
+    # This prevents issues when plan IDs change in the database
 
     try:
         # Check if UserSubscription table exists and get active subscription
@@ -74,22 +70,46 @@ async def check_user_subscription(user_id: str) -> dict:
                 "message": "Your subscription has expired. Please renew to create products."
             }
 
-        # Get subscription plan ID and limits
+        # Get subscription plan ID and fetch plan details from database
         plan_id = subscription.get("subscriptionPlanId")
         logger.info(f"Plan ID from subscription: {plan_id}")
-        plan_limits = SUBSCRIPTION_LIMITS.get(plan_id)
 
-        if not plan_limits:
-            logger.warning(f"Unknown subscription plan ID: {plan_id}. Available plans: {list(SUBSCRIPTION_LIMITS.keys())}")
+        # Fetch plan details from database
+        try:
+            plan_response = supabase.table("SubscriptionPlans").select("*").eq("id", plan_id).execute()
+
+            if not plan_response.data or len(plan_response.data) == 0:
+                logger.warning(f"Plan not found in database: {plan_id}")
+                return {
+                    "has_subscription": True,
+                    "subscription": subscription,
+                    "max_products": 0,
+                    "can_create_product": False,
+                    "message": f"Invalid subscription plan. Please contact support."
+                }
+
+            plan = plan_response.data[0]
+            subscription_tier = plan.get("subscriptionTier")
+
+            # Map tier to product limits
+            tier_limits = {
+                "LEVEL1": 5,
+                "LEVEL2": 20,
+                "LEVEL3": None  # Unlimited
+            }
+
+            max_products = tier_limits.get(subscription_tier, 0)
+            logger.info(f"Plan tier: {subscription_tier}, max products: {max_products}")
+
+        except Exception as plan_error:
+            logger.error(f"Error fetching plan details: {str(plan_error)}")
             return {
                 "has_subscription": True,
                 "subscription": subscription,
                 "max_products": 0,
                 "can_create_product": False,
-                "message": f"Invalid subscription plan ({plan_id}). Please contact support."
+                "message": f"Error fetching plan details. Please contact support."
             }
-
-        max_products = plan_limits["max_products"]
 
         if max_products is None:
             # Unlimited products (Enterprise)

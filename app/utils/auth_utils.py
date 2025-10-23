@@ -16,8 +16,8 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
-class AuthUtils:
 
+class AuthUtils:
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
         """Verify a password against its hash"""
@@ -29,7 +29,9 @@ class AuthUtils:
         return pwd_context.hash(password)
 
     @staticmethod
-    def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
+    def create_access_token(
+        data: Dict[str, Any], expires_delta: Optional[timedelta] = None
+    ) -> str:
         """Create a JWT access token"""
         to_encode = data.copy()
         if expires_delta:
@@ -58,61 +60,60 @@ class AuthUtils:
             if payload.get("type") != token_type:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail=f"Invalid token type. Expected {token_type}"
+                    detail=f"Invalid token type. Expected {token_type}",
                 )
             return payload
         except jwt.ExpiredSignatureError:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token has expired"
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired"
             )
         except jwt.JWTError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials"
+                detail="Could not validate credentials",
             )
 
     @staticmethod
     def verify_supabase_token(token: str) -> Optional[Dict[str, Any]]:
-     """Verify Supabase JWT token"""
-     try:
-        # Clean the token
-        token = token.strip()
-        
-        # Import Supabase JWT secret
-        from app.database import SUPABASE_JWT_SECRET
-        
-        # Decode with Supabase's JWT secret
-        payload = jwt.decode(
-            token, 
-            SUPABASE_JWT_SECRET,  # Use this, NOT SECRET_KEY
-            algorithms=["HS256"],
-            options={
-                "verify_signature": True,
-                "verify_exp": True,
-                "verify_aud": False
-            }
-        )
-        
-        # Supabase tokens have 'sub' claim
-        if 'sub' in payload:
-            return {
-                "user_id": payload['sub'],
-                "email": payload.get('email'),
-                "user_metadata": payload.get('user_metadata', {})
-            }
-        
-        return None
-        
-     except jwt.ExpiredSignatureError:
-        print(f"Token has expired")
-        return None
-     except jwt.InvalidTokenError as e:
-        print(f"Invalid token: {str(e)}")
-        return None
-     except Exception as e:
-        print(f"Token verification error: {str(e)}")
-        return None
+        """Verify Supabase JWT token"""
+        try:
+            # Clean the token
+            token = token.strip()
+
+            # Import Supabase JWT secret
+            from app.database import SUPABASE_JWT_SECRET
+
+            # Decode with Supabase's JWT secret
+            payload = jwt.decode(
+                token,
+                SUPABASE_JWT_SECRET,  # Use this, NOT SECRET_KEY
+                algorithms=["HS256"],
+                options={
+                    "verify_signature": True,
+                    "verify_exp": True,
+                    "verify_aud": False,
+                },
+            )
+
+            # Supabase tokens have 'sub' claim
+            if "sub" in payload:
+                return {
+                    "user_id": payload["sub"],
+                    "email": payload.get("email"),
+                    "user_metadata": payload.get("user_metadata", {}),
+                }
+
+            return None
+
+        except jwt.ExpiredSignatureError:
+            print(f"Token has expired")
+            return None
+        except jwt.InvalidTokenError as e:
+            print(f"Invalid token: {str(e)}")
+            return None
+        except Exception as e:
+            print(f"Token verification error: {str(e)}")
+            return None
 
     @staticmethod
     def extract_user_from_supabase_token(token: str) -> Dict[str, Any]:
@@ -121,7 +122,7 @@ class AuthUtils:
         if not user_data:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired token"
+                detail="Invalid or expired token",
             )
         return user_data
 
@@ -134,7 +135,8 @@ class AuthUtils:
     def is_valid_email(email: str) -> bool:
         """Basic email validation"""
         import re
-        pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+
+        pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
         return re.match(pattern, email) is not None
 
     @staticmethod
@@ -161,28 +163,32 @@ class AuthUtils:
     @staticmethod
     def sanitize_user_data(user_data: Dict[str, Any]) -> Dict[str, Any]:
         """Remove sensitive data from user object"""
-        sensitive_fields = ['password', 'password_hash', 'raw_user_meta_data']
+        sensitive_fields = ["password", "password_hash", "raw_user_meta_data"]
         return {k: v for k, v in user_data.items() if k not in sensitive_fields}
 
     @staticmethod
-    def create_mobile_session(user_id: str, device_info: Optional[str] = None) -> Dict[str, Any]:
+    def create_mobile_session(
+        user_id: str, device_info: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Create a mobile session with tokens"""
         session_data = {
             "user_id": user_id,
             "session_id": AuthUtils.generate_session_id(),
             "device_info": device_info,
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": datetime.utcnow().isoformat(),
         }
 
         access_token = AuthUtils.create_access_token(session_data)
-        refresh_token = AuthUtils.create_refresh_token({"user_id": user_id, "session_id": session_data["session_id"]})
+        refresh_token = AuthUtils.create_refresh_token(
+            {"user_id": user_id, "session_id": session_data["session_id"]}
+        )
 
         return {
             "access_token": access_token,
             "refresh_token": refresh_token,
             "token_type": "bearer",
             "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            "session_id": session_data["session_id"]
+            "session_id": session_data["session_id"],
         }
 
     @staticmethod
@@ -196,19 +202,18 @@ class AuthUtils:
             if not user_id or not session_id:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid refresh token"
+                    detail="Invalid refresh token",
                 )
 
             # Create new access token
-            new_access_token = AuthUtils.create_access_token({
-                "user_id": user_id,
-                "session_id": session_id
-            })
+            new_access_token = AuthUtils.create_access_token(
+                {"user_id": user_id, "session_id": session_id}
+            )
 
             return {
                 "access_token": new_access_token,
                 "token_type": "bearer",
-                "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60
+                "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
             }
 
         except HTTPException:
@@ -216,29 +221,29 @@ class AuthUtils:
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not refresh token"
+                detail="Could not refresh token",
             )
 
     @staticmethod
     def validate_mobile_request(headers: Dict[str, str]) -> Dict[str, Any]:
         """Validate mobile app request headers"""
-        required_headers = ['user-agent', 'authorization']
+        required_headers = ["user-agent", "authorization"]
         missing_headers = [h for h in required_headers if h not in headers]
 
         if missing_headers:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Missing required headers: {', '.join(missing_headers)}"
+                detail=f"Missing required headers: {', '.join(missing_headers)}",
             )
 
-        auth_header = headers.get('authorization', '')
-        if not auth_header.startswith('Bearer '):
+        auth_header = headers.get("authorization", "")
+        if not auth_header.startswith("Bearer "):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authorization header format"
+                detail="Invalid authorization header format",
             )
 
-        token = auth_header.split(' ')[1]
+        token = auth_header.split(" ")[1]
         return AuthUtils.extract_user_from_supabase_token(token)
 
     @staticmethod
@@ -247,7 +252,7 @@ class AuthUtils:
         data = {
             "email": email,
             "purpose": "password_reset",
-            "exp": datetime.utcnow() + timedelta(hours=1)  # 1 hour expiry
+            "exp": datetime.utcnow() + timedelta(hours=1),  # 1 hour expiry
         }
         return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -259,16 +264,141 @@ class AuthUtils:
             if payload.get("purpose") != "password_reset":
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid token purpose"
+                    detail="Invalid token purpose",
                 )
             return payload.get("email")
         except jwt.ExpiredSignatureError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Password reset token has expired"
+                detail="Password reset token has expired",
             )
         except jwt.JWTError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid password reset token"
+                detail="Invalid password reset token",
             )
+
+    @staticmethod
+    async def ensure_user_exists_in_db(user_data: Dict[str, Any]) -> bool:
+        """
+        Ensure user exists in local database, create if not exists.
+        This is used to sync users from Supabase auth to local database.
+
+        Args:
+            user_data: User data from JWT token containing user_id, email, user_metadata
+
+        Returns:
+            bool: True if user exists or was created successfully, False otherwise
+        """
+        try:
+            from app.database import supabase
+            from datetime import datetime
+            import logging
+
+            logger = logging.getLogger(__name__)
+
+            user_id = user_data.get("user_id")
+            if not user_id:
+                logger.error("No user_id found in user_data")
+                return False
+
+            email = user_data.get("email", "")
+            user_metadata = user_data.get("user_metadata", {})
+
+            # Check if user exists in local database by user_id
+            user_check_response = (
+                supabase.table("users")
+                .select("user_id")
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+            # If user exists, return True
+            if user_check_response.data and len(user_check_response.data) > 0:
+                return True
+
+            # User doesn't exist by user_id, need to create them
+            logger.info(f"User {user_id} not found in local database, creating...")
+
+            # Handle potential email conflict by creating unique email if needed
+            create_email = email
+            if email:
+                # Check if email exists with different user_id
+                email_check_response = (
+                    supabase.table("users")
+                    .select("user_id")
+                    .eq("email", email)
+                    .execute()
+                )
+
+                if email_check_response.data and len(email_check_response.data) > 0:
+                    # Email exists with different user_id, create unique email
+                    base_email = email.split("@")
+                    if len(base_email) == 2:
+                        create_email = f"{base_email[0]}+{user_id[:8]}@{base_email[1]}"
+                        logger.info(
+                            f"Email conflict detected, using modified email: {create_email}"
+                        )
+                    else:
+                        create_email = f"user_{user_id[:8]}@example.com"
+
+            # Create new user record
+            new_user_data = {
+                "user_id": user_id,
+                "email": create_email,
+                "name": user_metadata.get(
+                    "name",
+                    create_email.split("@")[0]
+                    if create_email
+                    else f"User_{user_id[:8]}",
+                ),
+                "verified": True,
+                "role": "client",
+                "created_at": datetime.utcnow().isoformat(),
+            }
+
+            # Add optional fields if available
+            if user_metadata.get("phone_number"):
+                new_user_data["phone_number"] = user_metadata["phone_number"]
+
+            create_response = supabase.table("users").insert(new_user_data).execute()
+
+            if create_response.data:
+                logger.info(f"Successfully created user {user_id} in local database")
+                return True
+            else:
+                logger.error(f"Failed to create user {user_id}: {create_response}")
+
+                # Fallback: Try creating user without email to avoid any conflicts
+                logger.info(
+                    f"Attempting fallback user creation without email for {user_id}"
+                )
+                fallback_user_data = {
+                    "user_id": user_id,
+                    "name": f"User_{user_id[:8]}",
+                    "verified": True,
+                    "role": "client",
+                    "created_at": datetime.utcnow().isoformat(),
+                }
+
+                fallback_response = (
+                    supabase.table("users").insert(fallback_user_data).execute()
+                )
+
+                if fallback_response.data:
+                    logger.info(
+                        f"Successfully created user {user_id} with fallback method"
+                    )
+                    return True
+                else:
+                    logger.error(
+                        f"Fallback user creation also failed for {user_id}: {fallback_response}"
+                    )
+                    return False
+
+        except Exception as e:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error ensuring user exists in database: {str(e)}")
+            return False
