@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.DS_Store
+
+# Virtual env
+venv/
+
+# Lambda build artifacts
+deployment/build/
+
+# Terraform local state (optional keep tracked if remote backend not used)
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+
+# Secrets
+infra/terraform/example.tfvars
+

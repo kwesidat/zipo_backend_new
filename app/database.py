@@ -11,14 +11,30 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET")
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
 
-if not all([SUPABASE_URL, SUPABASE_KEY, SUPABASE_BUCKET, SUPABASE_JWT_SECRET]):
-    raise ValueError("Missing one or more required environment variables: SUPABASE_URL, SUPABASE_KEY, SUPABASE_BUCKET")
+# Initialize Supabase client only when required env vars are present.
+missing_env = [
+    name
+    for name, value in [
+        ("SUPABASE_URL", SUPABASE_URL),
+        ("SUPABASE_ANON_KEY", SUPABASE_KEY),
+        ("SUPABASE_BUCKET", SUPABASE_BUCKET),
+        ("SUPABASE_JWT_SECRET", SUPABASE_JWT_SECRET),
+    ]
+    if not value
+]
 
-#Initialize the Supabase client with service role key (for backend operations)
-if SUPABASE_SERVICE_ROLE_KEY:
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+if missing_env:
+    print(
+        f"Warning: Missing required Supabase environment variables: {', '.join(missing_env)}. "
+        "Continuing startup without Supabase client."
+    )
+    supabase: Client | None = None
 else:
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    # Initialize the Supabase client with service role key (for backend operations)
+    if SUPABASE_SERVICE_ROLE_KEY:
+        supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    else:
+        supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Initialize Prisma client - will be lazy loaded
 prisma = None

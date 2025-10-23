@@ -23,6 +23,7 @@ from app.middleware.mobile_auth import (
 
 import logging
 import time
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -32,10 +33,16 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up ZipoHub API...")
-    await connect_db()
+    try:
+        await connect_db()
+    except Exception as e:
+        logger.warning(f"Database startup warning: {e}")
     yield
     logger.info("Shutting down ZipoHub API...")
-    await disconnect_db()
+    try:
+        await disconnect_db()
+    except Exception as e:
+        logger.warning(f"Database shutdown warning: {e}")
 
 
 app = FastAPI(
@@ -90,10 +97,13 @@ app.add_middleware(
     ],
 )
 
-# CORS Middleware
+# CORS Middleware - restrict via env ALLOWED_ORIGINS (comma-separated)
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "").strip()
+allowed_origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify actual domains
+    allow_origins=allowed_origins if allowed_origins else [],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=[

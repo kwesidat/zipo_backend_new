@@ -1,4 +1,4 @@
-import jwt
+from jose import jwt
 import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
@@ -7,8 +7,8 @@ from passlib.context import CryptContext
 from app.database import supabase, SUPABASE_JWT_SECRET
 import uuid
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Password hashing (use PBKDF2 to avoid native wheels on Lambda)
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 # JWT Configuration
 SECRET_KEY = SUPABASE_JWT_SECRET or "your-fallback-secret-key"
