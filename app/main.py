@@ -88,7 +88,7 @@ app.add_middleware(
         "/health",
         "/",
         "/api/auth/"
-    ]
+        ]
 )
 
 # CORS Middleware
@@ -185,3 +185,7 @@ async def api_info():
             "Cart Management"
         ]
     }
+
+
+# AWS Lambda handler
+handler = Mangum(app)
