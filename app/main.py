@@ -97,23 +97,13 @@ app.add_middleware(
     ],
 )
 
-# CORS Middleware - restrict via env ALLOWED_ORIGINS (comma-separated)
-allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "").strip()
-allowed_origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
-
+# CORS Middleware - unrestricted
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins if allowed_origins else [],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=[
-        "Authorization",
-        "Content-Type",
-        "X-Requested-With",
-        "Accept",
-        "Origin",
-        "User-Agent",
-    ],
+    allow_origins=["*"],
+    allow_credentials=False,  # must be False when allow_origins=["*"]
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
