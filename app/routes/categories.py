@@ -20,7 +20,7 @@ async def get_all_categories(
     """Get all categories with optional subcategories and product counts"""
     try:
         # Get all categories
-        categories_response = supabase.table("categories").select("*").is_("deleted_at", None).order("name").execute()
+        categories_response = supabase.table("categories").select("*").is_("deleted_at", "null").order("name").execute()
 
         if not categories_response.data:
             return CategoriesListResponse(categories=[], total_count=0)
@@ -33,7 +33,7 @@ async def get_all_categories(
 
         if include_subcategories:
             # Get all subcategories for all categories in one query
-            all_subcategories_response = supabase.table("subcategories").select("*").is_("deleted_at", None).order("name").execute()
+            all_subcategories_response = supabase.table("subcategories").select("*").is_("deleted_at", "null").order("name").execute()
 
             # Group subcategories by category_id
             for subcategory in all_subcategories_response.data:
@@ -122,7 +122,7 @@ async def get_category_by_id(
     """Get a specific category with its subcategories and optional recent products"""
     try:
         # Get the category
-        category_response = supabase.table("categories").select("*").eq("id", category_id).is_("deleted_at", None).execute()
+        category_response = supabase.table("categories").select("*").eq("id", category_id).is_("deleted_at", "null").execute()
 
         if not category_response.data or len(category_response.data) == 0:
             raise HTTPException(
@@ -133,7 +133,7 @@ async def get_category_by_id(
         category = category_response.data[0]
 
         # Get subcategories
-        subcategories_response = supabase.table("subcategories").select("*").eq("category_id", category_id).is_("deleted_at", None).order("name").execute()
+        subcategories_response = supabase.table("subcategories").select("*").eq("category_id", category_id).is_("deleted_at", "null").order("name").execute()
 
         subcategories_list = []
         total_products = 0
@@ -197,7 +197,7 @@ async def get_all_subcategories(
 ):
     """Get all subcategories, optionally filtered by category"""
     try:
-        query = supabase.table("subcategories").select("*").is_("deleted_at", None)
+        query = supabase.table("subcategories").select("*").is_("deleted_at", "null")
 
         if category_id:
             query = query.eq("category_id", category_id)
@@ -241,7 +241,7 @@ async def get_subcategory_by_id(subcategory_id: str):
     """Get a specific subcategory by ID"""
     try:
         # Get the subcategory
-        subcategory_response = supabase.table("subcategories").select("*").eq("id", subcategory_id).is_("deleted_at", None).execute()
+        subcategory_response = supabase.table("subcategories").select("*").eq("id", subcategory_id).is_("deleted_at", "null").execute()
 
         if not subcategory_response.data or len(subcategory_response.data) == 0:
             raise HTTPException(
@@ -279,7 +279,7 @@ async def get_categories_tree():
     """Get categories with their subcategories in a tree structure (simplified without product counts)"""
     try:
         # Get all categories
-        categories_response = supabase.table("categories").select("*").is_("deleted_at", None).order("name").execute()
+        categories_response = supabase.table("categories").select("*").is_("deleted_at", "null").order("name").execute()
 
         if not categories_response.data:
             return []
@@ -288,7 +288,7 @@ async def get_categories_tree():
 
         for category in categories_response.data:
             # Get subcategories for this category
-            subcategories_response = supabase.table("subcategories").select("*").eq("category_id", category["id"]).is_("deleted_at", None).order("name").execute()
+            subcategories_response = supabase.table("subcategories").select("*").eq("category_id", category["id"]).is_("deleted_at", "null").order("name").execute()
 
             subcategories_list = []
             for subcategory in subcategories_response.data:
