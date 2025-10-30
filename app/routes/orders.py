@@ -611,9 +611,9 @@ async def checkout_cart(
                     """
                     id, name, price, currency, quantity, sellerId, allowPurchaseOnPlatform,
                     photos, condition, country,
-                    users!products_sellerId_fkey(
+                    user:sellerId(
                         user_id, name, business_name,
-                        PaystackSubaccount(subaccountId)
+                        PaystackSubaccount!PaystackSubaccount_userId_fkey(subaccountId)
                     )
                     """
                 )
