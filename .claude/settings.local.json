@@ -14,7 +14,11 @@
       "Bash(python:*)",
       "Bash(awk:*)",
       "Read(//mnt/c/Users/Rahina/Documents/**)",
-      "Read(///**)"
+      "Read(///**)",
+      "Bash(git add:*)",
+      "Bash(git log:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []
