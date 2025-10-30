@@ -591,29 +591,40 @@ async def checkout_cart(
                 detail="Cannot checkout an empty cart",
             )
 
-        # Get cart items separately with product details
+        # Get cart items
         logger.info(f"Fetching cart items for cartId: {cart['id']}")
         cart_items_response = (
             supabase.table("CartItem")
-            .select(
-                """
-                *,
-                product:productId(
-                    id, name, price, currency, quantity, sellerId, allowPurchaseOnPlatform,
-                    photos, condition, country,
-                    user:sellerId(
-                        user_id, name, business_name,
-                        PaystackSubaccount(subaccountId)
-                    )
-                )
-                """
-            )
+            .select("*")
             .eq("cartId", cart["id"])
             .execute()
         )
 
         cart_items = cart_items_response.data or []
         logger.info(f"Found {len(cart_items)} cart items")
+
+        # Fetch product details for each cart item
+        for item in cart_items:
+            product_response = (
+                supabase.table("products")
+                .select(
+                    """
+                    id, name, price, currency, quantity, sellerId, allowPurchaseOnPlatform,
+                    photos, condition, country,
+                    users!products_sellerId_fkey(
+                        user_id, name, business_name,
+                        PaystackSubaccount(subaccountId)
+                    )
+                    """
+                )
+                .eq("id", item["productId"])
+                .execute()
+            )
+
+            if product_response.data and len(product_response.data) > 0:
+                item["product"] = product_response.data[0]
+            else:
+                item["product"] = None
 
         if not cart_items or len(cart_items) == 0:
             logger.error(f"No cart items found for cartId {cart['id']}, but cart.itemCount={cart['itemCount']}")
@@ -636,6 +647,10 @@ async def checkout_cart(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Product {item.get('productId', 'unknown')} not found or is invalid",
                 )
+
+            # Fix the user relationship - it's 'users' not 'user' from the foreign key
+            if product.get("users"):
+                product["user"] = product["users"]
 
             # Validate each product
             logger.info(f"Validating product {product.get('id')} for purchase")
