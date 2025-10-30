@@ -619,28 +619,37 @@ async def checkout_cart(
 
         # Fetch product details for each cart item
         for item in cart_items:
+            # First get the product
             product_response = (
                 supabase.table("products")
-                .select(
-                    """
-                    id, name, price, currency, quantity, sellerId, allowPurchaseOnPlatform,
-                    photos, condition, country,
-                    user:sellerId(
-                        user_id, name, business_name,
-                        PaystackSubaccount(subaccountId)
-                    )
-                    """
-                )
+                .select("*")
                 .eq("id", item["productId"])
                 .execute()
             )
 
             if product_response.data and len(product_response.data) > 0:
                 product_data = product_response.data[0]
-                # Debug log the product data structure
-                logger.info(f"🔍 Full product data for {item['productId']}: {product_data}")
-                logger.info(f"🔍 User data: {product_data.get('user')}")
-                logger.info(f"🔍 Seller ID: {product_data.get('sellerId')}")
+
+                # Now fetch the seller's user data and PaystackSubaccount separately
+                seller_id = product_data.get("sellerId")
+                if seller_id:
+                    seller_response = (
+                        supabase.table("users")
+                        .select("user_id, name, business_name, PaystackSubaccount(subaccountId)")
+                        .eq("user_id", seller_id)
+                        .execute()
+                    )
+
+                    if seller_response.data and len(seller_response.data) > 0:
+                        product_data["user"] = seller_response.data[0]
+                        logger.info(f"🔍 Seller data for product {item['productId']}: {seller_response.data[0]}")
+                    else:
+                        logger.error(f"❌ No seller found for sellerId: {seller_id}")
+                        product_data["user"] = None
+                else:
+                    logger.error(f"❌ Product {item['productId']} has no sellerId")
+                    product_data["user"] = None
+
                 item["product"] = product_data
             else:
                 item["product"] = None
