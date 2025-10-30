@@ -666,12 +666,10 @@ async def get_seller_invoices(
     try:
         seller_id = current_user["user_id"]
 
-        # Build query
+        # Build query - get invoices first without nested relationships
         query = (
             supabase.table("Invoice")
-            .select(
-                "*, purchase:purchaseId(quantity, unitPrice, shippingAddress, product:productId(name))"
-            )
+            .select("*")
             .eq("sellerId", seller_id)
         )
 
@@ -699,15 +697,42 @@ async def get_seller_invoices(
 
         response = query.execute()
 
+        # Get unique purchase IDs from invoices
+        purchase_ids = list(set(inv.get("purchaseId") for inv in response.data if inv.get("purchaseId")))
+
+        # Fetch purchases separately
+        purchases_by_id = {}
+        if purchase_ids:
+            purchases_response = (
+                supabase.table("purchases")
+                .select("id, quantity, unitPrice, shippingAddress, productId")
+                .in_("id", purchase_ids)
+                .execute()
+            )
+            purchases_by_id = {p["id"]: p for p in (purchases_response.data or [])}
+
+        # Get unique product IDs from purchases
+        product_ids = list(set(p.get("productId") for p in purchases_by_id.values() if p.get("productId")))
+
+        # Fetch products separately
+        products_by_id = {}
+        if product_ids:
+            products_response = (
+                supabase.table("products")
+                .select("id, name")
+                .in_("id", product_ids)
+                .execute()
+            )
+            products_by_id = {p["id"]: p for p in (products_response.data or [])}
+
+        # Manually join the data
         invoices = []
         for invoice in response.data:
-            purchase_data = invoice.get("purchase", {})
-            if isinstance(purchase_data, list):
-                purchase_data = purchase_data[0] if purchase_data else {}
+            purchase_id = invoice.get("purchaseId")
+            purchase_data = purchases_by_id.get(purchase_id, {})
 
-            product_data = purchase_data.get("product", {})
-            if isinstance(product_data, list):
-                product_data = product_data[0] if product_data else {}
+            product_id = purchase_data.get("productId")
+            product_data = products_by_id.get(product_id, {})
 
             invoices.append(
                 InvoiceWithPurchaseDetails(
@@ -762,11 +787,10 @@ async def get_seller_invoice(invoice_id: str, current_user=Depends(get_current_u
     try:
         seller_id = current_user["user_id"]
 
+        # Get invoice first without nested relationships
         invoice_response = (
             supabase.table("Invoice")
-            .select(
-                "*, purchase:purchaseId(quantity, unitPrice, shippingAddress, product:productId(name))"
-            )
+            .select("*")
             .eq("id", invoice_id)
             .eq("sellerId", seller_id)
             .execute()
@@ -778,13 +802,32 @@ async def get_seller_invoice(invoice_id: str, current_user=Depends(get_current_u
             )
 
         invoice = invoice_response.data[0]
-        purchase_data = invoice.get("purchase", {})
-        if isinstance(purchase_data, list):
-            purchase_data = purchase_data[0] if purchase_data else {}
+        purchase_id = invoice.get("purchaseId")
 
-        product_data = purchase_data.get("product", {})
-        if isinstance(product_data, list):
-            product_data = product_data[0] if product_data else {}
+        # Fetch purchase separately
+        purchase_data = {}
+        if purchase_id:
+            purchase_response = (
+                supabase.table("purchases")
+                .select("id, quantity, unitPrice, shippingAddress, productId")
+                .eq("id", purchase_id)
+                .execute()
+            )
+            if purchase_response.data:
+                purchase_data = purchase_response.data[0]
+
+        # Fetch product separately
+        product_data = {}
+        product_id = purchase_data.get("productId")
+        if product_id:
+            product_response = (
+                supabase.table("products")
+                .select("id, name")
+                .eq("id", product_id)
+                .execute()
+            )
+            if product_response.data:
+                product_data = product_response.data[0]
 
         return InvoiceWithPurchaseDetails(
             id=invoice["id"],
@@ -856,20 +899,38 @@ async def get_seller_dashboard(current_user=Depends(get_current_user)):
         logger.info(f"=== DASHBOARD: Fetching data for seller: {seller_id} ===")
 
         # ========== 1. Get All Orders for Seller's Products ==========
+        # Get order items first without nested relationships
         orders_response = (
             supabase.table("OrderItem")
-            .select("""
-                id, orderId, productId, quantity, price, createdAt,
-                order:orderId(
-                    id, userId, total, status, createdAt, paymentStatus
-                )
-            """)
+            .select("id, orderId, productId, quantity, price, createdAt")
             .eq("sellerId", seller_id)
             .execute()
         )
 
         order_items = orders_response.data if orders_response.data else []
         logger.info(f"Found {len(order_items)} order items for seller {seller_id}")
+
+        # Get unique order IDs
+        order_ids = list(set(item.get("orderId") for item in order_items if item.get("orderId")))
+
+        # Fetch orders separately
+        orders_by_id = {}
+        if order_ids:
+            orders_data_response = (
+                supabase.table("Order")
+                .select("id, userId, total, status, createdAt, paymentStatus, shippingAddress")
+                .in_("id", order_ids)
+                .execute()
+            )
+            orders_by_id = {o["id"]: o for o in (orders_data_response.data or [])}
+
+        # Manually join order data to order items
+        for item in order_items:
+            order_id = item.get("orderId")
+            if order_id and order_id in orders_by_id:
+                item["order"] = orders_by_id[order_id]
+            else:
+                item["order"] = {}
 
         # Get unique orders (not order items) to count actual orders
         unique_orders = set()
@@ -1307,12 +1368,10 @@ async def get_seller_customers(
     try:
         seller_id = current_user["user_id"]
 
-        # Get all order items for this seller
+        # Get all order items for this seller without nested relationships
         order_items_response = (
             supabase.table("OrderItem")
-            .select(
-                "*, order:orderId(id, userId, createdAt, total, status, paymentStatus, shippingAddress)"
-            )
+            .select("*")
             .eq("sellerId", seller_id)
             .execute()
         )
@@ -1328,13 +1387,26 @@ async def get_seller_customers(
                 has_previous=page > 1,
             )
 
+        # Get unique order IDs
+        order_ids = list(set(item.get("orderId") for item in order_items_response.data if item.get("orderId")))
+
+        # Fetch orders separately
+        orders_by_id = {}
+        if order_ids:
+            orders_data_response = (
+                supabase.table("Order")
+                .select("id, userId, createdAt, total, status, paymentStatus, shippingAddress")
+                .in_("id", order_ids)
+                .execute()
+            )
+            orders_by_id = {o["id"]: o for o in (orders_data_response.data or [])}
+
         # Group by customer (userId or email from shipping address)
         customers_dict: Dict[str, Dict[str, Any]] = {}
 
         for item in order_items_response.data:
-            order_data = item.get("order", {})
-            if isinstance(order_data, list):
-                order_data = order_data[0] if order_data else {}
+            order_id = item.get("orderId")
+            order_data = orders_by_id.get(order_id, {})
 
             if not order_data:
                 continue
@@ -1523,13 +1595,10 @@ async def get_seller_customer_detail(
     try:
         seller_id = current_user["user_id"]
 
-        # Get all order items for this seller and customer
-        # First try by userId
+        # Get all order items for this seller without nested relationships
         order_items_response = (
             supabase.table("OrderItem")
-            .select(
-                "*, order:orderId(id, userId, createdAt, total, status, paymentStatus, shippingAddress)"
-            )
+            .select("*")
             .eq("sellerId", seller_id)
             .execute()
         )
@@ -1540,15 +1609,28 @@ async def get_seller_customer_detail(
                 detail="Customer not found",
             )
 
+        # Get unique order IDs
+        order_ids = list(set(item.get("orderId") for item in order_items_response.data if item.get("orderId")))
+
+        # Fetch orders separately
+        orders_by_id = {}
+        if order_ids:
+            orders_data_response = (
+                supabase.table("Order")
+                .select("id, userId, createdAt, total, status, paymentStatus, shippingAddress")
+                .in_("id", order_ids)
+                .execute()
+            )
+            orders_by_id = {o["id"]: o for o in (orders_data_response.data or [])}
+
         # Filter for this specific customer
         customer_orders = []
         customer_info = None
         products_ordered_set = set()
 
         for item in order_items_response.data:
-            order_data = item.get("order", {})
-            if isinstance(order_data, list):
-                order_data = order_data[0] if order_data else {}
+            order_id = item.get("orderId")
+            order_data = orders_by_id.get(order_id, {})
 
             if not order_data:
                 continue
@@ -1691,28 +1773,13 @@ async def get_seller_orders(
         seller_id = current_user["user_id"]
         logger.info(f"=== SELLER ORDERS: Fetching orders for seller: {seller_id} ===")
 
-        # Get order items for this seller with full order details
+        # Get order items for this seller
         query = (
             supabase.table("OrderItem")
-            .select("""
-            id, orderId, productId, quantity, price, title, image, condition, location,
-            order:orderId(
-                id, userId, subtotal, discountAmount, tax, total, status,
-                paymentStatus, currency, shippingAddress, trackingNumber,
-                paymentMethod, paymentGateway, createdAt, updatedAt
-            )
-        """)
+            .select("*")
             .eq("sellerId", seller_id)
+            .order("createdAt", desc=True)
         )
-
-        # Apply filters if provided
-        if status:
-            query = query.eq("order.status", status)
-        if payment_status:
-            query = query.eq("order.paymentStatus", payment_status)
-
-        # Order by most recent first
-        query = query.order("createdAt", desc=True)
 
         response = query.execute()
         order_items = response.data if response.data else []
@@ -1724,11 +1791,43 @@ async def get_seller_orders(
                 orders=[], total=0, page=offset // limit + 1, limit=limit, totalPages=0
             )
 
+        # Get unique order IDs
+        order_ids = list(set(item["orderId"] for item in order_items))
+        logger.info(f"Fetching details for {len(order_ids)} unique orders")
+
+        # Fetch all orders
+        orders_response = (
+            supabase.table("Order")
+            .select("*")
+            .in_("id", order_ids)
+            .execute()
+        )
+
+        orders_by_id = {order["id"]: order for order in (orders_response.data or [])}
+
+        # Apply filters if provided
+        if status or payment_status:
+            filtered_order_ids = []
+            for order_id, order in orders_by_id.items():
+                if status and order.get("status") != status:
+                    continue
+                if payment_status and order.get("paymentStatus") != payment_status:
+                    continue
+                filtered_order_ids.append(order_id)
+
+            # Filter order items
+            order_items = [item for item in order_items if item["orderId"] in filtered_order_ids]
+
+            if not order_items:
+                return SellerOrdersListResponse(
+                    orders=[], total=0, page=offset // limit + 1, limit=limit, totalPages=0
+                )
+
         # Group order items by order
         orders_dict: Dict[str, Dict[str, Any]] = {}
 
         for item in order_items:
-            order_data = item.get("order", {})
+            order_data = orders_by_id.get(item["orderId"])
             if not order_data:
                 continue
 

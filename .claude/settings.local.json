@@ -12,7 +12,9 @@
       "Bash(curl:*)",
       "Bash(./venv/Scripts/python.exe:*)",
       "Bash(python:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Read(//mnt/c/Users/Rahina/Documents/**)",
+      "Read(///**)"
     ],
     "deny": [],
     "ask": []

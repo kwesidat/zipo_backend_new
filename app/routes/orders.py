@@ -1452,7 +1452,7 @@ async def verify_payment(
 @router.get("/orders", response_model=List[OrderResponse])
 async def get_user_orders(
     current_user=Depends(get_current_user),
-    status: Optional[str] = None,
+    order_status: Optional[str] = None,
     limit: int = Query(20, le=100),
     offset: int = Query(0, ge=0),
 ):
@@ -1462,18 +1462,12 @@ async def get_user_orders(
 
         query = (
             supabase.table("Order")
-            .select(
-                """
-            *,
-            items:OrderItem(*),
-            appliedDiscounts:OrderDiscount(*)
-            """
-            )
+            .select("*")
             .eq("userId", user_id)
         )
 
-        if status:
-            query = query.eq("status", status)
+        if order_status:
+            query = query.eq("status", order_status)
 
         query = query.order("createdAt", desc=True).range(offset, offset + limit - 1)
 
@@ -1481,6 +1475,22 @@ async def get_user_orders(
 
         orders = []
         for order in response.data:
+            # Fetch order items separately
+            items_response = (
+                supabase.table("OrderItem")
+                .select("*")
+                .eq("orderId", order["id"])
+                .execute()
+            )
+
+            # Fetch order discounts separately
+            discounts_response = (
+                supabase.table("OrderDiscount")
+                .select("*")
+                .eq("orderId", order["id"])
+                .execute()
+            )
+
             order_items = [
                 {
                     "id": item["id"],
@@ -1495,7 +1505,7 @@ async def get_user_orders(
                     "condition": item.get("condition"),
                     "location": item.get("location"),
                 }
-                for item in order["items"]
+                for item in (items_response.data or [])
             ]
 
             orders.append(
@@ -1516,7 +1526,7 @@ async def get_user_orders(
                     "createdAt": order["createdAt"],
                     "updatedAt": order["updatedAt"],
                     "items": order_items,
-                    "appliedDiscounts": order.get("appliedDiscounts", []),
+                    "appliedDiscounts": discounts_response.data or [],
                 }
             )
 
@@ -1541,13 +1551,7 @@ async def get_order(order_id: str, current_user=Depends(get_current_user)):
 
         order_response = (
             supabase.table("Order")
-            .select(
-                """
-            *,
-            items:OrderItem(*),
-            appliedDiscounts:OrderDiscount(*)
-            """
-            )
+            .select("*")
             .eq("id", order_id)
             .eq("userId", user_id)
             .execute()
@@ -1559,6 +1563,22 @@ async def get_order(order_id: str, current_user=Depends(get_current_user)):
             )
 
         order = order_response.data[0]
+
+        # Fetch order items separately
+        items_response = (
+            supabase.table("OrderItem")
+            .select("*")
+            .eq("orderId", order["id"])
+            .execute()
+        )
+
+        # Fetch order discounts separately
+        discounts_response = (
+            supabase.table("OrderDiscount")
+            .select("*")
+            .eq("orderId", order["id"])
+            .execute()
+        )
 
         order_items = [
             {
@@ -1574,7 +1594,7 @@ async def get_order(order_id: str, current_user=Depends(get_current_user)):
                 "condition": item.get("condition"),
                 "location": item.get("location"),
             }
-            for item in order["items"]
+            for item in (items_response.data or [])
         ]
 
         return {
@@ -1594,7 +1614,7 @@ async def get_order(order_id: str, current_user=Depends(get_current_user)):
             "createdAt": order["createdAt"],
             "updatedAt": order["updatedAt"],
             "items": order_items,
-            "appliedDiscounts": order.get("appliedDiscounts", []),
+            "appliedDiscounts": discounts_response.data or [],
         }
 
     except HTTPException:
