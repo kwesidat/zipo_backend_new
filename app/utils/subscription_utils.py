@@ -111,19 +111,20 @@ async def check_user_subscription(user_id: str) -> dict:
                 "message": f"Error fetching plan details. Please contact support."
             }
 
+        # Check current product count (for all tiers)
+        product_count_response = supabase.table("products").select("id", count="exact").eq("sellerId", user_id).execute()
+        current_product_count = product_count_response.count or 0
+
         if max_products is None:
             # Unlimited products (Enterprise)
             return {
                 "has_subscription": True,
                 "subscription": subscription,
                 "max_products": None,
+                "current_products": current_product_count,
                 "can_create_product": True,
                 "message": "Unlimited products allowed"
             }
-
-        # Check current product count
-        product_count_response = supabase.table("products").select("id", count="exact").eq("sellerId", user_id).execute()
-        current_product_count = product_count_response.count or 0
 
         can_create = current_product_count < max_products
 
