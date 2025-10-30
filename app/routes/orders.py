@@ -570,25 +570,10 @@ async def checkout_cart(
 
         logger.info(f"Checkout request from user {user_id}")
 
-        # Get cart with items
+        # Get cart
         cart_response = (
             supabase.table("Cart")
-            .select(
-                """
-            *,
-            items:CartItem(
-                *,
-                product:productId(
-                    id, name, price, currency, quantity, sellerId, allowPurchaseOnPlatform,
-                    photos, condition, country,
-                    user:sellerId(
-                        user_id, name, business_name,
-                        PaystackSubaccount(subaccountId)
-                    )
-                )
-            )
-            """
-            )
+            .select("*")
             .eq("userId", user_id)
             .execute()
         )
@@ -606,28 +591,54 @@ async def checkout_cart(
                 detail="Cannot checkout an empty cart",
             )
 
-        # Validate all cart items
-        cart_currency = cart["currency"]
-        product_ids = []
+        # Get cart items separately with product details
+        logger.info(f"Fetching cart items for cartId: {cart['id']}")
+        cart_items_response = (
+            supabase.table("CartItem")
+            .select(
+                """
+                *,
+                product:productId(
+                    id, name, price, currency, quantity, sellerId, allowPurchaseOnPlatform,
+                    photos, condition, country,
+                    user:sellerId(
+                        user_id, name, business_name,
+                        PaystackSubaccount(subaccountId)
+                    )
+                )
+                """
+            )
+            .eq("cartId", cart["id"])
+            .execute()
+        )
 
-        cart_items = cart.get("items", [])
+        cart_items = cart_items_response.data or []
+        logger.info(f"Found {len(cart_items)} cart items")
 
         if not cart_items or len(cart_items) == 0:
+            logger.error(f"No cart items found for cartId {cart['id']}, but cart.itemCount={cart['itemCount']}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cart is empty. Cannot checkout an empty cart.",
             )
 
+        # Validate all cart items
+        cart_currency = cart["currency"]
+        product_ids = []
+
         for item in cart_items:
             product = item.get("product")
+            logger.info(f"Processing cart item: productId={item.get('productId')}, product data type: {type(product)}")
 
             if not product or not isinstance(product, dict):
+                logger.error(f"Product data invalid for item {item.get('productId')}: {product}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Product {item.get('productId', 'unknown')} not found or is invalid",
                 )
 
             # Validate each product
+            logger.info(f"Validating product {product.get('id')} for purchase")
             validate_product_for_purchase(product, item["quantity"], user_id)
 
             # Ensure all products are in the same currency (already validated in cart, but double-check)
