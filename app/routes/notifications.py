@@ -103,7 +103,7 @@ async def get_user_notifications(
         unread_count = unread_response.count or 0
 
         # Execute main query with pagination
-        query = query.order("createdAt", desc=True).limit(page_size).offset(offset)
+        query = query.order("createdAt", desc=True).range(offset, offset + page_size - 1)
         response = query.execute()
 
         notifications = response.data or []
