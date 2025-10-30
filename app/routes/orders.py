@@ -627,7 +627,7 @@ async def checkout_cart(
                     photos, condition, country,
                     user:sellerId(
                         user_id, name, business_name,
-                        PaystackSubaccount!PaystackSubaccount_userId_fkey(subaccountId)
+                        PaystackSubaccount(subaccountId)
                     )
                     """
                 )
@@ -638,7 +638,9 @@ async def checkout_cart(
             if product_response.data and len(product_response.data) > 0:
                 product_data = product_response.data[0]
                 # Debug log the product data structure
-                logger.info(f"Product data for {item['productId']}: user={product_data.get('user')}")
+                logger.info(f"🔍 Full product data for {item['productId']}: {product_data}")
+                logger.info(f"🔍 User data: {product_data.get('user')}")
+                logger.info(f"🔍 Seller ID: {product_data.get('sellerId')}")
                 item["product"] = product_data
             else:
                 item["product"] = None
