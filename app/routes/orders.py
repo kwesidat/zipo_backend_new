@@ -244,7 +244,21 @@ def validate_product_for_purchase(product: dict, quantity: int, buyer_user_id: s
 
     # Check if seller has subaccount
     seller = product.get("user", {})
-    if not seller.get("PaystackSubaccount"):
+
+    # Handle case where seller might be a list
+    if isinstance(seller, list):
+        seller = seller[0] if seller else {}
+
+    # Get PaystackSubaccount data
+    paystack_data = seller.get("PaystackSubaccount")
+
+    # Handle case where PaystackSubaccount might be a list, dict, or None
+    if isinstance(paystack_data, list):
+        paystack_data = paystack_data[0] if paystack_data else None
+
+    # Check if subaccount exists and has subaccountId
+    if not paystack_data or not isinstance(paystack_data, dict) or not paystack_data.get("subaccountId"):
+        logger.error(f"Seller validation failed - product: {product.get('id')}, seller: {seller.get('user_id')}, paystack_data: {paystack_data}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Seller has not set up their payment account. Cannot purchase this product.",
@@ -622,7 +636,10 @@ async def checkout_cart(
             )
 
             if product_response.data and len(product_response.data) > 0:
-                item["product"] = product_response.data[0]
+                product_data = product_response.data[0]
+                # Debug log the product data structure
+                logger.info(f"Product data for {item['productId']}: user={product_data.get('user')}")
+                item["product"] = product_data
             else:
                 item["product"] = None
 
@@ -648,12 +665,8 @@ async def checkout_cart(
                     detail=f"Product {item.get('productId', 'unknown')} not found or is invalid",
                 )
 
-            # Fix the user relationship - it's 'users' not 'user' from the foreign key
-            if product.get("users"):
-                product["user"] = product["users"]
-
             # Validate each product
-            logger.info(f"Validating product {product.get('id')} for purchase")
+            logger.info(f"Validating product {product.get('id')} for purchase. Seller data: {product.get('user')}")
             validate_product_for_purchase(product, item["quantity"], user_id)
 
             # Ensure all products are in the same currency (already validated in cart, but double-check)
