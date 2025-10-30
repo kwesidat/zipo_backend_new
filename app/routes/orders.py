@@ -1449,7 +1449,7 @@ async def get_user_orders(
         if status:
             query = query.eq("status", status)
 
-        query = query.order("createdAt", desc=True).limit(limit).offset(offset)
+        query = query.order("createdAt", desc=True).range(offset, offset + limit - 1)
 
         response = query.execute()
 
