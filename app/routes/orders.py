@@ -1417,6 +1417,7 @@ async def verify_payment(
             message = "Payment pending or failed"
 
         # Format order response
+        order_items_raw = order.get("items") or order.get("OrderItem") or []
         order_items = [
             {
                 "id": item["id"],
@@ -1431,7 +1432,7 @@ async def verify_payment(
                 "condition": item.get("condition"),
                 "location": item.get("location"),
             }
-            for item in order["items"]
+            for item in order_items_raw
         ]
 
         return {
