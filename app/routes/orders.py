@@ -987,7 +987,8 @@ async def verify_payment(
         # Update order based on payment status
         if data["status"] == "success":
             # Update product quantities
-            for item in order["items"]:
+            order_items = order.get("items") or order.get("OrderItem") or []
+            for item in order_items:
                 # Fetch current product quantity
                 product_response = (
                     supabase.table("products")
@@ -1026,6 +1027,7 @@ async def verify_payment(
                 .execute()
             )
             order = order_response.data[0]
+            order_items = order.get("items") or order.get("OrderItem") or []
 
             # Create notifications for buyer and sellers
             now = datetime.now(timezone.utc)
@@ -1033,7 +1035,7 @@ async def verify_payment(
 
             # Get unique sellers from order items
             sellers = {}
-            for item in order["items"]:
+            for item in order_items:
                 seller_id = item["sellerId"]
                 if seller_id not in sellers:
                     sellers[seller_id] = {
@@ -1049,10 +1051,10 @@ async def verify_payment(
 
             # 1. Create notification for BUYER
             buyer_items_text = ", ".join(
-                [f"{item['quantity']}x {item['title']}" for item in order["items"][:3]]
+                [f"{item['quantity']}x {item['title']}" for item in order_items[:3]]
             )
-            if len(order["items"]) > 3:
-                buyer_items_text += f" and {len(order['items']) - 3} more items"
+            if len(order_items) > 3:
+                buyer_items_text += f" and {len(order_items) - 3} more items"
 
             buyer_notification = {
                 "id": str(uuid.uuid4()),
