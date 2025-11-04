@@ -1123,7 +1123,7 @@ async def verify_payment(
             )
 
             # Create ProductPurchase and Invoice for each order item
-            for item in order["items"]:
+            for item in order_items:
                 try:
                     # 3. Create ProductPurchase record
                     purchase_data = {
@@ -1282,7 +1282,7 @@ async def verify_payment(
 
             # Group items by seller for processing
             sellers_data = {}
-            for item in order["items"]:
+            for item in order_items:
                 seller_id = item["sellerId"]
                 if seller_id not in sellers_data:
                     sellers_data[seller_id] = {
@@ -1346,7 +1346,7 @@ async def verify_payment(
                 # 2. Update Seller Analytics
                 try:
                     update_seller_analytics(
-                        seller_id, order["items"], seller_data["total"]
+                        seller_id, order_items, seller_data["total"]
                     )
                 except Exception as analytics_error:
                     logger.error(
@@ -1359,7 +1359,7 @@ async def verify_payment(
                         seller_id=seller_id,
                         event_type="PAYMENT_RECEIVED",
                         order_id=order_id,
-                        order_items=order["items"],
+                        order_items=order_items,
                         order_total=seller_data["total"],
                     )
                 except Exception as event_error:
