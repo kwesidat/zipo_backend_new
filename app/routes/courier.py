@@ -114,7 +114,7 @@ async def courier_signup(user_data: CourierSignUpRequest):
                     break
                 courier_code = generate_courier_code()
 
-            current_time = datetime.utcnow()
+            current_time = datetime.utcnow().isoformat()
 
             courier_profile_data = {
                 "user_id": user.id,
