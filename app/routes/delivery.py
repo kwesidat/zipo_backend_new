@@ -656,6 +656,110 @@ async def update_delivery_status(
         )
 
 
+# ========== GET USER'S SCHEDULED DELIVERIES ==========
+
+
+@router.get("/my-deliveries", response_model=DeliveryListResponse)
+async def get_my_deliveries(
+    current_user=Depends(get_current_user),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    status: Optional[str] = None,
+):
+    """
+    Get all deliveries scheduled by the current user.
+    Shows deliveries with their current status and details.
+    """
+    try:
+        user_id = current_user["user_id"]
+
+        logger.info(f"User {user_id} fetching their scheduled deliveries, page {page}")
+
+        # Calculate offset
+        offset = (page - 1) * page_size
+
+        # Build query - get deliveries scheduled by this user
+        query = supabase.table("Delivery").select("*", count="exact").eq("scheduled_by_user", user_id)
+
+        # Filter by status if provided
+        if status:
+            query = query.eq("status", status)
+
+        # Order by creation date (most recent first)
+        query = query.order("created_at", desc=True)
+        query = query.range(offset, offset + page_size - 1)
+
+        response = query.execute()
+
+        total_count = response.count or 0
+        deliveries_data = response.data or []
+
+        # Transform data
+        deliveries = []
+        for delivery in deliveries_data:
+            deliveries.append(
+                DeliveryResponse(
+                    id=delivery["id"],
+                    order_id=delivery["order_id"],
+                    courier_id=delivery.get("courier_id"),
+                    pickup_address=delivery["pickup_address"],
+                    delivery_address=delivery["delivery_address"],
+                    pickup_contact_name=delivery.get("pickup_contact_name"),
+                    pickup_contact_phone=delivery.get("pickup_contact_phone"),
+                    delivery_contact_name=delivery.get("delivery_contact_name"),
+                    delivery_contact_phone=delivery.get("delivery_contact_phone"),
+                    scheduled_by_user=delivery["scheduled_by_user"],
+                    scheduled_by_type=UserType(delivery["scheduled_by_type"]),
+                    delivery_fee=Decimal(str(delivery["delivery_fee"])),
+                    courier_fee=Decimal(str(delivery.get("courier_fee", 0))),
+                    platform_fee=Decimal(str(delivery.get("platform_fee", 0))),
+                    distance_km=delivery.get("distance_km"),
+                    status=DeliveryStatus(delivery["status"]),
+                    priority=DeliveryPriority(delivery["priority"]),
+                    scheduled_date=delivery.get("scheduled_date"),
+                    estimated_pickup_time=delivery.get("estimated_pickup_time"),
+                    estimated_delivery_time=delivery.get("estimated_delivery_time"),
+                    actual_pickup_time=delivery.get("actual_pickup_time"),
+                    actual_delivery_time=delivery.get("actual_delivery_time"),
+                    notes=delivery.get("notes"),
+                    courier_notes=delivery.get("courier_notes"),
+                    cancellation_reason=delivery.get("cancellation_reason"),
+                    proof_of_delivery=delivery.get("proof_of_delivery", []),
+                    customer_signature=delivery.get("customer_signature"),
+                    rating=delivery.get("rating"),
+                    review=delivery.get("review"),
+                    created_at=delivery["created_at"],
+                    updated_at=delivery["updated_at"],
+                )
+            )
+
+        # Calculate pagination info
+        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+        has_next = page < total_pages
+        has_previous = page > 1
+
+        logger.info(f"✅ Retrieved {len(deliveries)} scheduled deliveries for user {user_id}")
+
+        return DeliveryListResponse(
+            deliveries=deliveries,
+            total_count=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_next=has_next,
+            has_previous=has_previous,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error fetching user's scheduled deliveries: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch scheduled deliveries",
+        )
+
+
 # ========== GET DELIVERY BY ID ==========
 
 
