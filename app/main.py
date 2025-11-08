@@ -16,6 +16,7 @@ from app.routes.orders import router as orders_router
 from app.routes.notifications import router as notifications_router
 from app.routes.seller import router as seller_router
 from app.routes.courier import router as courier_router
+from app.routes.delivery import router as delivery_router
 from app.middleware.mobile_auth import (
     MobileAuthMiddleware,
     RateLimitMiddleware,
@@ -137,6 +138,7 @@ app.include_router(discounts_router, prefix="/api", tags=["discounts"])
 app.include_router(notifications_router, prefix="/api", tags=["notifications"])
 app.include_router(seller_router, prefix="/api", tags=["seller"])
 app.include_router(courier_router, prefix="/api/courier", tags=["courier"])
+app.include_router(delivery_router, prefix="/api/deliveries", tags=["deliveries"])
 
 
 # Health check endpoint
@@ -190,6 +192,11 @@ async def api_info():
             "seller_top_products": "/api/seller/top-products",
             "seller_orders": "/api/seller/orders",
             "user_invoices": "/api/user/invoices",
+            "schedule_delivery": "/api/deliveries/schedule",
+            "available_deliveries": "/api/deliveries/available",
+            "accept_delivery": "/api/deliveries/accept",
+            "delivery_details": "/api/deliveries/{delivery_id}",
+            "update_delivery_status": "/api/deliveries/{delivery_id}/status",
             "health": "/health",
             "docs": "/docs",
         },
@@ -212,6 +219,11 @@ async def api_info():
             "Cart Checkout",
             "Order Management",
             "Payment Verification",
+            "Courier Delivery System",
+            "Standalone Delivery Scheduling (ZipoExpress)",
+            "Order with Courier Delivery",
+            "Real-time Delivery Tracking",
+            "Courier Management",
             "Seller Dashboard",
             "Seller Analytics",
             "Seller Events & Notifications",

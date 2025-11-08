@@ -84,11 +84,17 @@ class BuyNowRequest(BaseModel):
     discountCode: Optional[str] = Field(None, description="Optional discount code")
     shippingAddress: ShippingAddress
     paymentGateway: PaymentGateway = PaymentGateway.PAYSTACK
+    enableCourierDelivery: bool = Field(False, description="Enable courier pickup and delivery")
+    deliveryPriority: Optional[str] = Field(None, description="STANDARD, EXPRESS, or URGENT")
+    deliveryNotes: Optional[str] = Field(None, description="Special delivery instructions")
 
 class CheckoutRequest(BaseModel):
     shippingAddress: ShippingAddress
     discountCode: Optional[str] = Field(None, description="Optional discount code")
     paymentGateway: PaymentGateway = PaymentGateway.PAYSTACK
+    enableCourierDelivery: bool = Field(False, description="Enable courier pickup and delivery")
+    deliveryPriority: Optional[str] = Field(None, description="STANDARD, EXPRESS, or URGENT")
+    deliveryNotes: Optional[str] = Field(None, description="Special delivery instructions")
 
 class PaymentInitResponse(BaseModel):
     authorization_url: str
