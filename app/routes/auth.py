@@ -57,7 +57,7 @@ def fetch_user_with_profile(user_id: str, user_db: dict) -> "UserResponse":
         business_name=user_db.get("business_name"),
         business_description=user_db.get("business_description"),
         verified=user_db.get("verified", False),
-        role=user_db.get("role", "CUSTOMER"),
+        role=user_db.get("role", "client"),
         user_type=user_db.get("user_type"),
         courier_profile=courier_profile
     )
@@ -101,7 +101,8 @@ async def signup(user_data: SignUpRequest):
                     "address": user_data.address,
                     "business_name": user_data.business_name,
                     "business_description": user_data.business_description,
-                    "role": user_data.role.value,
+                    "role": user_data.role,
+                    "user_type": user_data.user_type.value if user_data.user_type else None,
                     "verified": False
                 }
             }
@@ -129,7 +130,8 @@ async def signup(user_data: SignUpRequest):
                 "address": user_data.address,
                 "business_name": user_data.business_name,
                 "business_description": user_data.business_description,
-                "role": user_data.role.value,
+                "role": user_data.role,
+                "user_type": user_data.user_type.value if user_data.user_type else None,
                 "verified": False
             }
 
@@ -161,7 +163,8 @@ async def signup(user_data: SignUpRequest):
             business_name=user_data.business_name,
             business_description=user_data.business_description,
             verified=False,
-            role=user_data.role.value
+            role=user_data.role,
+            user_type=user_data.user_type.value if user_data.user_type else None
         )
 
         return AuthResponse(
@@ -218,7 +221,7 @@ async def login(credentials: LoginRequest):
                     business_name=user_metadata.get("business_name"),
                     business_description=user_metadata.get("business_description"),
                     verified=user_metadata.get("verified", False),
-                    role=user_metadata.get("role", "CUSTOMER")
+                    role=user_metadata.get("role", "client")
                 )
 
         except Exception as db_error:
@@ -236,7 +239,7 @@ async def login(credentials: LoginRequest):
                 business_name=user_metadata.get("business_name"),
                 business_description=user_metadata.get("business_description"),
                 verified=user_metadata.get("verified", False),
-                role=user_metadata.get("role", "CUSTOMER")
+                role=user_metadata.get("role", "CLIENT")
             )
 
         return AuthResponse(
@@ -307,7 +310,7 @@ async def mobile_login(credentials: LoginRequest, request: Request):
                     business_name=user_metadata.get("business_name"),
                     business_description=user_metadata.get("business_description"),
                     verified=user_metadata.get("verified", False),
-                    role=user_metadata.get("role", "CUSTOMER"),
+                    role=user_metadata.get("role", "client"),
                     user_type=user_metadata.get("user_type")
                 )
 
@@ -326,7 +329,7 @@ async def mobile_login(credentials: LoginRequest, request: Request):
                 business_name=user_metadata.get("business_name"),
                 business_description=user_metadata.get("business_description"),
                 verified=user_metadata.get("verified", False),
-                role=user_metadata.get("role", "CUSTOMER")
+                role=user_metadata.get("role", "client")
             )
 
         # Create mobile session
@@ -393,7 +396,8 @@ async def mobile_signup(user_data: SignUpRequest, request: Request):
                     "address": user_data.address,
                     "business_name": user_data.business_name,
                     "business_description": user_data.business_description,
-                    "role": user_data.role.value,
+                    "role": user_data.role,
+                    "user_type": user_data.user_type.value if user_data.user_type else None,
                     "verified": False
                 }
             }
@@ -421,7 +425,8 @@ async def mobile_signup(user_data: SignUpRequest, request: Request):
                 "address": user_data.address,
                 "business_name": user_data.business_name,
                 "business_description": user_data.business_description,
-                "role": user_data.role.value,
+                "role": user_data.role,
+                "user_type": user_data.user_type.value if user_data.user_type else None,
                 "verified": False
             }
 
@@ -459,7 +464,8 @@ async def mobile_signup(user_data: SignUpRequest, request: Request):
             business_name=user_data.business_name,
             business_description=user_data.business_description,
             verified=False,
-            role=user_data.role.value
+            role=user_data.role,
+            user_type=user_data.user_type.value if user_data.user_type else None
         )
 
         return {
@@ -832,7 +838,7 @@ async def check_auth_status(credentials: Optional[HTTPAuthorizationCredentials] 
                         business_name=user_metadata_from_token.get("business_name"),
                         business_description=user_metadata_from_token.get("business_description"),
                         verified=user_metadata_from_token.get("verified", False),
-                        role=user_metadata_from_token.get("role", "CUSTOMER"),
+                        role=user_metadata_from_token.get("role", "client"),
                         user_type=user_metadata_from_token.get("user_type")
                     )
 
@@ -857,7 +863,7 @@ async def check_auth_status(credentials: Optional[HTTPAuthorizationCredentials] 
                     business_name=user_metadata_from_token.get("business_name"),
                     business_description=user_metadata_from_token.get("business_description"),
                     verified=user_metadata_from_token.get("verified", False),
-                    role=user_metadata_from_token.get("role", "CUSTOMER")
+                    role=user_metadata_from_token.get("role", "client")
                 )
 
                 return AuthStatusResponse(
@@ -971,7 +977,7 @@ async def check_mobile_auth_status(request: Request, credentials: Optional[HTTPA
                         business_name=user_metadata_from_token.get("business_name"),
                         business_description=user_metadata_from_token.get("business_description"),
                         verified=user_metadata_from_token.get("verified", False),
-                        role=user_metadata_from_token.get("role", "CUSTOMER"),
+                        role=user_metadata_from_token.get("role", "client"),
                         user_type=user_metadata_from_token.get("user_type")
                     )
 
@@ -1000,7 +1006,7 @@ async def check_mobile_auth_status(request: Request, credentials: Optional[HTTPA
                     business_name=user_metadata_from_token.get("business_name"),
                     business_description=user_metadata_from_token.get("business_description"),
                     verified=user_metadata_from_token.get("verified", False),
-                    role=user_metadata_from_token.get("role", "CUSTOMER")
+                    role=user_metadata_from_token.get("role", "CLIENT")
                 )
 
                 return {

@@ -3,6 +3,7 @@ from typing import Optional
 from enum import Enum
 
 class UserType(str, Enum):
+    CLIENT = "CLIENT"
     CUSTOMER = "CUSTOMER"
     SELLER = "SELLER"
     AGENT = "AGENT"
@@ -19,7 +20,8 @@ class SignUpRequest(BaseModel):
     address: Optional[str] = None
     business_name: Optional[str] = None
     business_description: Optional[str] = None
-    role: UserType = UserType.CUSTOMER
+    role: str = "client"  # "client" or "seller"
+    user_type: Optional[UserType] = None
 
 class LoginRequest(BaseModel):
     email: EmailStr

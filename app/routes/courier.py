@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, status
 from app.models.courier import CourierSignUpRequest
 from app.database import supabase
 from app.utils.auth_utils import AuthUtils
+from datetime import datetime
 import random
 import string
 
@@ -113,6 +114,8 @@ async def courier_signup(user_data: CourierSignUpRequest):
                     break
                 courier_code = generate_courier_code()
 
+            current_time = datetime.utcnow()
+
             courier_profile_data = {
                 "user_id": user.id,
                 "courier_code": courier_code,
@@ -125,7 +128,9 @@ async def courier_signup(user_data: CourierSignUpRequest):
                 "total_deliveries": 0,
                 "completed_deliveries": 0,
                 "total_earnings": 0.0,
-                "available_balance": 0.0
+                "available_balance": 0.0,
+                "created_at": current_time,
+                "updated_at": current_time
             }
 
             # Remove None values
