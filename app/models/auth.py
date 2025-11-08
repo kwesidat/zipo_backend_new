@@ -7,6 +7,7 @@ class UserType(str, Enum):
     SELLER = "SELLER"
     AGENT = "AGENT"
     ADMIN = "ADMIN"
+    COURIER = "COURIER"
 
 class SignUpRequest(BaseModel):
     email: EmailStr
@@ -24,6 +25,18 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
+class CourierProfileData(BaseModel):
+    courier_id: str
+    courier_code: str
+    vehicle_type: Optional[str] = None
+    vehicle_number: Optional[str] = None
+    license_number: Optional[str] = None
+    rating: float = 0.0
+    total_deliveries: int = 0
+    completed_deliveries: int = 0
+    is_available: bool = True
+    is_verified: bool = False
+
 class UserResponse(BaseModel):
     user_id: str
     name: str
@@ -36,6 +49,8 @@ class UserResponse(BaseModel):
     business_description: Optional[str] = None
     verified: bool = False
     role: str
+    user_type: Optional[str] = None
+    courier_profile: Optional[CourierProfileData] = None
 
 class AuthResponse(BaseModel):
     user: UserResponse

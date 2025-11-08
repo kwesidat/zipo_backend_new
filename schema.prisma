@@ -82,6 +82,8 @@ model users {
   registered_by_agent  AgentRegisteredSeller[] @relation("RegisteredByAgent")
   agent_sessions       AgentSession[]          @relation("AgentSessionsAsSeller")
   cart                 Cart?
+  courier_profile      Courier?                @relation("CourierProfile")
+  deliveries_scheduled Delivery[]              @relation("DeliveryScheduledBy")
   Discount             Discount[]
   Invoice              Invoice[]
   Notification         Notification[]
@@ -331,6 +333,7 @@ model Order {
   subtotal         Decimal             @db.Decimal(10, 2)
   discountAmount   Decimal             @default(0) @db.Decimal(10, 2)
   tax              Decimal             @default(0) @db.Decimal(10, 2)
+  deliveryFee      Decimal             @default(0) @db.Decimal(10, 2)
   total            Decimal             @db.Decimal(10, 2)
   status           OrderStatus         @default(PENDING)
   currency         SupportedCurrencies @default(GHS)
@@ -343,6 +346,7 @@ model Order {
   updatedAt        DateTime            @updatedAt
   user             users               @relation(fields: [userId], references: [user_id], onDelete: Cascade)
   appliedDiscounts OrderDiscount[]
+  deliveries       Delivery[]
   items            OrderItem[]
 
   @@index([userId])
@@ -673,9 +677,168 @@ enum commissiontransactiontype {
   ADJUSTMENT
 }
 
+model Courier {
+  id                String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id           String              @unique @db.Uuid
+  courier_code      String              @unique
+  vehicle_type      VehicleType?
+  vehicle_number    String?
+  license_number    String?
+  service_areas     String[]            @default([])
+  current_location  Json?
+  rating            Float               @default(0)
+  total_deliveries  Int                 @default(0)
+  completed_deliveries Int              @default(0)
+  total_earnings    Decimal             @default(0) @db.Decimal(10, 2)
+  available_balance Decimal             @default(0) @db.Decimal(10, 2)
+  bank_name         String?
+  account_number    String?
+  account_name      String?
+  is_available      Boolean             @default(true)
+  is_verified       Boolean             @default(false)
+  created_at        DateTime            @default(now()) @db.Timestamp(6)
+  updated_at        DateTime            @updatedAt @db.Timestamp(6)
+  user              users               @relation("CourierProfile", fields: [user_id], references: [user_id], onDelete: Cascade)
+  deliveries        Delivery[]
+  courier_earnings  CourierEarning[]
+  location_history  CourierLocation[]
+
+  @@index([courier_code])
+  @@index([user_id])
+  @@index([is_available, is_verified])
+}
+
+model Delivery {
+  id                     String              @id @default(uuid()) @db.Uuid
+  order_id               String              @db.Uuid
+  courier_id             String?             @db.Uuid
+  pickup_address         Json
+  delivery_address       Json
+  pickup_contact_name    String?
+  pickup_contact_phone   String?
+  delivery_contact_name  String?
+  delivery_contact_phone String?
+  scheduled_by_user      String              @db.Uuid
+  scheduled_by_type      usertype
+  delivery_fee           Decimal             @db.Decimal(10, 2)
+  courier_fee            Decimal?            @db.Decimal(10, 2)
+  platform_fee           Decimal?            @db.Decimal(10, 2)
+  distance_km            Float?
+  status                 DeliveryStatus      @default(PENDING)
+  priority               DeliveryPriority    @default(STANDARD)
+  scheduled_date         DateTime?
+  estimated_pickup_time  DateTime?
+  estimated_delivery_time DateTime?
+  actual_pickup_time     DateTime?
+  actual_delivery_time   DateTime?
+  notes                  String?
+  courier_notes          String?
+  cancellation_reason    String?
+  proof_of_delivery      String[]            @default([])
+  customer_signature     String?
+  rating                 Float?
+  review                 String?
+  created_at             DateTime            @default(now())
+  updated_at             DateTime            @updatedAt
+  courier                Courier?            @relation(fields: [courier_id], references: [id])
+  order                  Order               @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  scheduled_by           users               @relation("DeliveryScheduledBy", fields: [scheduled_by_user], references: [user_id])
+  status_history         DeliveryStatusHistory[]
+
+  @@index([order_id])
+  @@index([courier_id])
+  @@index([status])
+  @@index([scheduled_date])
+  @@index([scheduled_by_user])
+}
+
+model CourierEarning {
+  id             String              @id @default(uuid()) @db.Uuid
+  courier_id     String              @db.Uuid
+  delivery_id    String?             @db.Uuid
+  amount         Decimal             @db.Decimal(10, 2)
+  type           CourierEarningType
+  description    String?
+  status         EarningStatus       @default(PENDING)
+  created_at     DateTime            @default(now())
+  processed_at   DateTime?
+  courier        Courier             @relation(fields: [courier_id], references: [id], onDelete: Cascade)
+
+  @@index([courier_id])
+  @@index([status])
+  @@index([delivery_id])
+}
+
+model DeliveryStatusHistory {
+  id          String         @id @default(uuid()) @db.Uuid
+  delivery_id String         @db.Uuid
+  status      DeliveryStatus
+  notes       String?
+  location    Json?
+  created_at  DateTime       @default(now())
+  delivery    Delivery       @relation(fields: [delivery_id], references: [id], onDelete: Cascade)
+
+  @@index([delivery_id])
+  @@index([created_at])
+}
+
+model CourierLocation {
+  id         String   @id @default(uuid()) @db.Uuid
+  courier_id String   @db.Uuid
+  latitude   Float
+  longitude  Float
+  accuracy   Float?
+  created_at DateTime @default(now())
+  courier    Courier  @relation(fields: [courier_id], references: [id], onDelete: Cascade)
+
+  @@index([courier_id])
+  @@index([created_at])
+}
+
+enum DeliveryStatus {
+  PENDING
+  ASSIGNED
+  ACCEPTED
+  PICKED_UP
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+  FAILED
+}
+
+enum DeliveryPriority {
+  STANDARD
+  EXPRESS
+  URGENT
+}
+
+enum VehicleType {
+  BICYCLE
+  MOTORCYCLE
+  CAR
+  VAN
+  TRUCK
+}
+
+enum CourierEarningType {
+  DELIVERY_FEE
+  BONUS
+  TIP
+  ADJUSTMENT
+  WITHDRAWAL
+}
+
+enum EarningStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REVERSED
+}
+
 enum usertype {
   CUSTOMER
   SELLER
   AGENT
   ADMIN
+  COURIER
 }

@@ -15,6 +15,7 @@ from app.routes.discounts import router as discounts_router
 from app.routes.orders import router as orders_router
 from app.routes.notifications import router as notifications_router
 from app.routes.seller import router as seller_router
+from app.routes.courier import router as courier_router
 from app.middleware.mobile_auth import (
     MobileAuthMiddleware,
     RateLimitMiddleware,
@@ -82,6 +83,7 @@ app.add_middleware(
         "/api/auth/logout",
         "/api/auth/mobile/status",
         "/api/auth/mobile/logout",
+        "/api/courier/signup",
         "/api/categories",
         "/api/subcategories",
         "/api/categories-tree",
@@ -134,6 +136,7 @@ app.include_router(webhooks_router, prefix="/api/webhooks", tags=["webhooks"])
 app.include_router(discounts_router, prefix="/api", tags=["discounts"])
 app.include_router(notifications_router, prefix="/api", tags=["notifications"])
 app.include_router(seller_router, prefix="/api", tags=["seller"])
+app.include_router(courier_router, prefix="/api/courier", tags=["courier"])
 
 
 # Health check endpoint

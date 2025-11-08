@@ -17,6 +17,52 @@ auth = supabase.auth
 security = HTTPBearer()
 
 
+def fetch_user_with_profile(user_id: str, user_db: dict) -> "UserResponse":
+    """
+    Helper function to fetch user data with courier profile if applicable
+    """
+    from app.models.auth import CourierProfileData
+
+    # Fetch courier profile if user is a courier
+    courier_profile = None
+    if user_db.get("user_type") == "COURIER":
+        try:
+            courier_response = supabase.table("Courier").select("*").eq("user_id", user_id).execute()
+
+            if courier_response.data and len(courier_response.data) > 0:
+                courier_data = courier_response.data[0]
+                courier_profile = CourierProfileData(
+                    courier_id=courier_data["id"],
+                    courier_code=courier_data["courier_code"],
+                    vehicle_type=courier_data.get("vehicle_type"),
+                    vehicle_number=courier_data.get("vehicle_number"),
+                    license_number=courier_data.get("license_number"),
+                    rating=float(courier_data.get("rating", 0.0)),
+                    total_deliveries=courier_data.get("total_deliveries", 0),
+                    completed_deliveries=courier_data.get("completed_deliveries", 0),
+                    is_available=courier_data.get("is_available", True),
+                    is_verified=courier_data.get("is_verified", False)
+                )
+        except Exception as courier_error:
+            print(f"Courier profile fetch error: {courier_error}")
+
+    return UserResponse(
+        user_id=user_db["user_id"],
+        name=user_db["name"],
+        email=user_db["email"],
+        phone_number=user_db.get("phone_number"),
+        country=user_db.get("country"),
+        city=user_db.get("city"),
+        address=user_db.get("address"),
+        business_name=user_db.get("business_name"),
+        business_description=user_db.get("business_description"),
+        verified=user_db.get("verified", False),
+        role=user_db.get("role", "CUSTOMER"),
+        user_type=user_db.get("user_type"),
+        courier_profile=courier_profile
+    )
+
+
 
 @router.get("/")
 async def get_all_user():
@@ -157,19 +203,7 @@ async def login(credentials: LoginRequest):
 
             if db_response.data and len(db_response.data) > 0:
                 user_db = db_response.data[0]
-                user_response = UserResponse(
-                    user_id=user_db["user_id"],
-                    name=user_db["name"],
-                    email=user_db["email"],
-                    phone_number=user_db.get("phone_number"),
-                    country=user_db.get("country"),
-                    city=user_db.get("city"),
-                    address=user_db.get("address"),
-                    business_name=user_db.get("business_name"),
-                    business_description=user_db.get("business_description"),
-                    verified=user_db.get("verified", False),
-                    role=user_db.get("role", "CUSTOMER")
-                )
+                user_response = fetch_user_with_profile(user.id, user_db)
             else:
                 # Fallback to metadata if no database record
                 user_metadata = user.user_metadata or {}
@@ -258,19 +292,7 @@ async def mobile_login(credentials: LoginRequest, request: Request):
 
             if db_response.data and len(db_response.data) > 0:
                 user_db = db_response.data[0]
-                user_response = UserResponse(
-                    user_id=user_db["user_id"],
-                    name=user_db["name"],
-                    email=user_db["email"],
-                    phone_number=user_db.get("phone_number"),
-                    country=user_db.get("country"),
-                    city=user_db.get("city"),
-                    address=user_db.get("address"),
-                    business_name=user_db.get("business_name"),
-                    business_description=user_db.get("business_description"),
-                    verified=user_db.get("verified", False),
-                    role=user_db.get("role", "CUSTOMER")
-                )
+                user_response = fetch_user_with_profile(user.id, user_db)
             else:
                 # Fallback to metadata if no database record
                 user_metadata = user.user_metadata or {}
@@ -285,7 +307,8 @@ async def mobile_login(credentials: LoginRequest, request: Request):
                     business_name=user_metadata.get("business_name"),
                     business_description=user_metadata.get("business_description"),
                     verified=user_metadata.get("verified", False),
-                    role=user_metadata.get("role", "CUSTOMER")
+                    role=user_metadata.get("role", "CUSTOMER"),
+                    user_type=user_metadata.get("user_type")
                 )
 
         except Exception as db_error:
@@ -795,19 +818,7 @@ async def check_auth_status(credentials: Optional[HTTPAuthorizationCredentials] 
 
                 if db_response.data and len(db_response.data) > 0:
                     user_db = db_response.data[0]
-                    user_response_data = UserResponse(
-                        user_id=user_db["user_id"],
-                        name=user_db["name"],
-                        email=user_db["email"],
-                        phone_number=user_db.get("phone_number"),
-                        country=user_db.get("country"),
-                        city=user_db.get("city"),
-                        address=user_db.get("address"),
-                        business_name=user_db.get("business_name"),
-                        business_description=user_db.get("business_description"),
-                        verified=user_db.get("verified", False),
-                        role=user_db.get("role", "CUSTOMER")
-                    )
+                    user_response_data = fetch_user_with_profile(user_id, user_db)
                 else:
                     # Fallback to metadata from token
                     user_response_data = UserResponse(
@@ -821,7 +832,8 @@ async def check_auth_status(credentials: Optional[HTTPAuthorizationCredentials] 
                         business_name=user_metadata_from_token.get("business_name"),
                         business_description=user_metadata_from_token.get("business_description"),
                         verified=user_metadata_from_token.get("verified", False),
-                        role=user_metadata_from_token.get("role", "CUSTOMER")
+                        role=user_metadata_from_token.get("role", "CUSTOMER"),
+                        user_type=user_metadata_from_token.get("user_type")
                     )
 
                 return AuthStatusResponse(
@@ -945,19 +957,7 @@ async def check_mobile_auth_status(request: Request, credentials: Optional[HTTPA
 
                 if db_response.data and len(db_response.data) > 0:
                     user_db = db_response.data[0]
-                    user_data = UserResponse(
-                        user_id=user_db["user_id"],
-                        name=user_db["name"],
-                        email=user_db["email"],
-                        phone_number=user_db.get("phone_number"),
-                        country=user_db.get("country"),
-                        city=user_db.get("city"),
-                        address=user_db.get("address"),
-                        business_name=user_db.get("business_name"),
-                        business_description=user_db.get("business_description"),
-                        verified=user_db.get("verified", False),
-                        role=user_db.get("role", "CUSTOMER")
-                    )
+                    user_data = fetch_user_with_profile(user_id, user_db)
                 else:
                     # Fallback to metadata from token
                     user_data = UserResponse(
@@ -971,7 +971,8 @@ async def check_mobile_auth_status(request: Request, credentials: Optional[HTTPA
                         business_name=user_metadata_from_token.get("business_name"),
                         business_description=user_metadata_from_token.get("business_description"),
                         verified=user_metadata_from_token.get("verified", False),
-                        role=user_metadata_from_token.get("role", "CUSTOMER")
+                        role=user_metadata_from_token.get("role", "CUSTOMER"),
+                        user_type=user_metadata_from_token.get("user_type")
                     )
 
                 return {
