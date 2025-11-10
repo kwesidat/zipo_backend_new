@@ -75,7 +75,7 @@ class AuthUtils:
 
     @staticmethod
     def verify_supabase_token(token: str) -> Optional[Dict[str, Any]]:
-        """Verify Supabase JWT token"""
+        """Verify Supabase JWT token and enrich with database user info"""
         try:
             # Clean the token
             token = token.strip()
@@ -97,11 +97,27 @@ class AuthUtils:
 
             # Supabase tokens have 'sub' claim
             if "sub" in payload:
-                return {
-                    "user_id": payload["sub"],
+                user_id = payload["sub"]
+                user_data = {
+                    "user_id": user_id,
                     "email": payload.get("email"),
                     "user_metadata": payload.get("user_metadata", {}),
                 }
+
+                # Fetch additional user info from database (user_type, role)
+                try:
+                    from app.database import supabase
+                    db_user_response = supabase.table("users").select("role, user_type").eq("user_id", user_id).execute()
+
+                    if db_user_response.data and len(db_user_response.data) > 0:
+                        db_user = db_user_response.data[0]
+                        user_data["role"] = db_user.get("role")
+                        user_data["user_type"] = db_user.get("user_type") or db_user.get("role")  # Fallback to role if user_type not set
+                except Exception as db_error:
+                    print(f"Could not fetch user role from database: {str(db_error)}")
+                    # Continue without role/user_type - endpoint will handle if needed
+
+                return user_data
 
             return None
 

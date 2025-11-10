@@ -656,6 +656,134 @@ async def update_delivery_status(
         )
 
 
+# ========== COURIER: GET MY ACCEPTED DELIVERIES ==========
+
+
+@router.get("/courier/my-deliveries", response_model=DeliveryListResponse)
+async def get_courier_deliveries(
+    current_user=Depends(get_current_user),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    status: Optional[str] = None,
+):
+    """
+    Get all deliveries assigned to the current courier.
+    Shows deliveries that the courier has accepted.
+    """
+    try:
+        user_id = current_user["user_id"]
+        user_type = current_user.get("user_type")
+
+        # Verify user is a courier
+        if user_type != "COURIER":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only couriers can view their deliveries",
+            )
+
+        logger.info(f"Courier {user_id} fetching their deliveries, page {page}")
+
+        # Get courier profile
+        courier_response = (
+            supabase.table("Courier")
+            .select("id")
+            .eq("user_id", user_id)
+            .execute()
+        )
+
+        if not courier_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Courier profile not found",
+            )
+
+        courier_id = courier_response.data[0]["id"]
+
+        # Calculate offset
+        offset = (page - 1) * page_size
+
+        # Build query - get deliveries assigned to this courier
+        query = supabase.table("Delivery").select("*", count="exact").eq("courier_id", courier_id)
+
+        # Filter by status if provided
+        if status:
+            query = query.eq("status", status)
+
+        # Order by updated date (most recent first)
+        query = query.order("updated_at", desc=True)
+        query = query.range(offset, offset + page_size - 1)
+
+        response = query.execute()
+
+        total_count = response.count or 0
+        deliveries_data = response.data or []
+
+        # Transform data
+        deliveries = []
+        for delivery in deliveries_data:
+            deliveries.append(
+                DeliveryResponse(
+                    id=delivery["id"],
+                    order_id=delivery["order_id"],
+                    courier_id=delivery.get("courier_id"),
+                    pickup_address=delivery["pickup_address"],
+                    delivery_address=delivery["delivery_address"],
+                    pickup_contact_name=delivery.get("pickup_contact_name"),
+                    pickup_contact_phone=delivery.get("pickup_contact_phone"),
+                    delivery_contact_name=delivery.get("delivery_contact_name"),
+                    delivery_contact_phone=delivery.get("delivery_contact_phone"),
+                    scheduled_by_user=delivery["scheduled_by_user"],
+                    scheduled_by_type=UserType(delivery["scheduled_by_type"]),
+                    delivery_fee=Decimal(str(delivery["delivery_fee"])),
+                    courier_fee=Decimal(str(delivery.get("courier_fee", 0))),
+                    platform_fee=Decimal(str(delivery.get("platform_fee", 0))),
+                    distance_km=delivery.get("distance_km"),
+                    status=DeliveryStatus(delivery["status"]),
+                    priority=DeliveryPriority(delivery["priority"]),
+                    scheduled_date=delivery.get("scheduled_date"),
+                    estimated_pickup_time=delivery.get("estimated_pickup_time"),
+                    estimated_delivery_time=delivery.get("estimated_delivery_time"),
+                    actual_pickup_time=delivery.get("actual_pickup_time"),
+                    actual_delivery_time=delivery.get("actual_delivery_time"),
+                    notes=delivery.get("notes"),
+                    courier_notes=delivery.get("courier_notes"),
+                    cancellation_reason=delivery.get("cancellation_reason"),
+                    proof_of_delivery=delivery.get("proof_of_delivery", []),
+                    customer_signature=delivery.get("customer_signature"),
+                    rating=delivery.get("rating"),
+                    review=delivery.get("review"),
+                    created_at=delivery["created_at"],
+                    updated_at=delivery["updated_at"],
+                )
+            )
+
+        # Calculate pagination info
+        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+        has_next = page < total_pages
+        has_previous = page > 1
+
+        logger.info(f"✅ Retrieved {len(deliveries)} deliveries for courier {user_id}")
+
+        return DeliveryListResponse(
+            deliveries=deliveries,
+            total_count=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_next=has_next,
+            has_previous=has_previous,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error fetching courier deliveries: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch courier deliveries",
+        )
+
+
 # ========== GET USER'S SCHEDULED DELIVERIES ==========
 
 
@@ -765,7 +893,7 @@ async def get_my_deliveries(
 
 @router.get("/{delivery_id}", response_model=DeliveryResponse)
 async def get_delivery(delivery_id: str, current_user=Depends(get_current_user)):
-    """Get delivery details by ID"""
+    """Get delivery details by ID with courier information"""
     try:
         user_id = current_user["user_id"]
 
@@ -846,4 +974,91 @@ async def get_delivery(delivery_id: str, current_user=Depends(get_current_user))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch delivery",
+        )
+
+
+# ========== GET COURIER DETAILS FOR A DELIVERY ==========
+
+
+@router.get("/{delivery_id}/courier")
+async def get_delivery_courier_details(delivery_id: str, current_user=Depends(get_current_user)):
+    """
+    Get courier details for a specific delivery.
+    Only accessible by the user who scheduled the delivery.
+    """
+    try:
+        user_id = current_user["user_id"]
+
+        # Get delivery
+        delivery_response = (
+            supabase.table("Delivery")
+            .select("courier_id, scheduled_by_user")
+            .eq("id", delivery_id)
+            .execute()
+        )
+
+        if not delivery_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Delivery not found",
+            )
+
+        delivery = delivery_response.data[0]
+
+        # Verify user scheduled this delivery
+        if delivery["scheduled_by_user"] != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to this delivery",
+            )
+
+        # Check if courier is assigned
+        if not delivery.get("courier_id"):
+            return {
+                "delivery_id": delivery_id,
+                "courier_assigned": False,
+                "message": "No courier has accepted this delivery yet"
+            }
+
+        # Get courier details
+        courier_response = (
+            supabase.table("Courier")
+            .select("*, users!inner(name, phone_number)")
+            .eq("id", delivery["courier_id"])
+            .execute()
+        )
+
+        if not courier_response.data:
+            return {
+                "delivery_id": delivery_id,
+                "courier_assigned": False,
+                "message": "Courier information not available"
+            }
+
+        courier = courier_response.data[0]
+        user_info = courier.get("users", {})
+
+        return {
+            "delivery_id": delivery_id,
+            "courier_assigned": True,
+            "courier": {
+                "courier_id": courier["id"],
+                "courier_code": courier.get("courier_code"),
+                "name": user_info.get("name"),
+                "phone_number": user_info.get("phone_number"),
+                "vehicle_type": courier.get("vehicle_type"),
+                "vehicle_number": courier.get("vehicle_number"),
+                "rating": courier.get("rating", 0),
+                "total_deliveries": courier.get("total_deliveries", 0),
+                "completed_deliveries": courier.get("completed_deliveries", 0),
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error fetching courier details: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch courier details",
         )

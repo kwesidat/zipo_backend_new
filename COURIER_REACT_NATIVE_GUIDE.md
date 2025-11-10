@@ -1,754 +1,1253 @@
-# Courier Authentication - React Native Implementation Guide
+# Courier Feature Implementation Guide - React Native
 
-This guide will help you implement the courier authentication system in your React Native project using **unified authentication**.
-
-## 🎯 Key Concept: Unified Authentication
-
-**All users (Customers, Sellers, and Couriers) use the same authentication endpoints** (`/api/auth/*`). The only courier-specific endpoint is signup (`/api/courier/signup`), which creates a courier profile. After signup, couriers use the regular auth endpoints for login, password reset, etc.
+This comprehensive guide will help you implement all courier-related features in your React Native app, including viewing available deliveries, accepting them, updating status, and allowing users to see courier details.
 
 ---
 
 ## Table of Contents
-1. [API Endpoints Overview](#api-endpoints-overview)
-2. [Setup & Installation](#setup--installation)
-3. [Authentication Flow](#authentication-flow)
-4. [Implementation Steps](#implementation-steps)
-5. [Code Examples](#code-examples)
-6. [User Type Detection](#user-type-detection)
-7. [Error Handling](#error-handling)
-8. [Best Practices](#best-practices)
+
+1. [Authentication Setup](#1-authentication-setup)
+2. [API Service Configuration](#2-api-service-configuration)
+3. [Courier Screens](#3-courier-screens)
+4. [Customer Screens](#4-customer-screens)
+5. [State Management](#5-state-management)
+6. [Real-time Updates (Optional)](#6-real-time-updates-optional)
+7. [Testing](#7-testing)
 
 ---
 
-## API Endpoints Overview
+## 1. Authentication Setup
 
-### Courier-Specific Endpoint
+### Store User Token and Type
 
-| Endpoint | Method | Description | Auth Required |
-|----------|--------|-------------|---------------|
-| `/api/courier/signup` | POST | Register a new courier (creates courier profile) | No |
+After login, make sure to store both the access token and user type:
 
-### Shared Authentication Endpoints (All User Types)
-
-These endpoints work for **all users** including couriers:
-
-| Endpoint | Method | Description | Auth Required |
-|----------|--------|-------------|---------------|
-| `/api/auth/login` | POST | Login (customers, sellers, couriers) | No |
-| `/api/auth/refresh` | POST | Refresh access token | No |
-| `/api/auth/status` | GET | Validate current token | Yes |
-| `/api/auth/logout` | POST | Logout user | Yes |
-| `/api/auth/password-reset/request` | POST | Request password reset OTP | No |
-| `/api/auth/password-reset/verify-otp` | POST | Verify OTP code | No |
-| `/api/auth/password-reset/complete` | POST | Complete password reset | No |
-
----
-
-## Setup & Installation
-
-### 1. Install Required Packages
-
-```bash
-npm install axios react-native-async-storage/async-storage
-# or
-yarn add axios @react-native-async-storage/async-storage
-```
-
-### 2. Create API Configuration
-
-Create a file: `src/services/api.js`
-
-```javascript
-import axios from 'axios';
+```typescript
+// services/authService.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_BASE_URL = 'https://your-api-domain.com/api';
+export const authService = {
+  async login(email: string, password: string) {
+    const response = await fetch('YOUR_API_URL/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
 
-const api = axios.create({
-  baseURL: API_BASE_URL,
-  timeout: 10000,
-  headers: {
-    'Content-Type': 'application/json',
+    const data = await response.json();
+
+    if (response.ok) {
+      // Store token and user info
+      await AsyncStorage.setItem('access_token', data.access_token);
+      await AsyncStorage.setItem('user_type', data.user.user_type);
+      await AsyncStorage.setItem('user_data', JSON.stringify(data.user));
+      return data;
+    }
+
+    throw new Error(data.detail || 'Login failed');
   },
-});
 
-// Request interceptor to add auth token
-api.interceptors.request.use(
-  async (config) => {
-    const token = await AsyncStorage.getItem('access_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
+  async getToken() {
+    return await AsyncStorage.getItem('access_token');
   },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
 
-// Response interceptor to handle token refresh
-api.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    const originalRequest = error.config;
-
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true;
-
-      try {
-        const refreshToken = await AsyncStorage.getItem('refresh_token');
-        const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
-          refresh_token: refreshToken,
-        });
-
-        const { access_token, refresh_token } = response.data;
-
-        await AsyncStorage.setItem('access_token', access_token);
-        await AsyncStorage.setItem('refresh_token', refresh_token);
-
-        originalRequest.headers.Authorization = `Bearer ${access_token}`;
-        return api(originalRequest);
-      } catch (refreshError) {
-        // Refresh failed, logout user
-        await AsyncStorage.multiRemove([
-          'access_token',
-          'refresh_token',
-          'user',
-        ]);
-        // Navigate to login screen
-        return Promise.reject(refreshError);
-      }
-    }
-
-    return Promise.reject(error);
-  }
-);
-
-export default api;
-```
-
----
-
-## Authentication Flow
-
-```
-┌─────────────────┐
-│ Courier Sign Up │──────────┐
-│ /courier/signup │          │
-└─────────────────┘          │
-                             ▼
-                      ┌──────────────┐
-                      │Verify Email  │
-                      └──────┬───────┘
-                             │
-                             ▼
-                      ┌──────────────┐
-                      │Regular Login │──────┐
-                      │ /auth/login  │      │
-                      └──────────────┘      │
-                                            ▼
-┌─────────────────┐                 ┌──────────────┐
-│ Customer/Seller │────────────────▶│ Store Tokens │
-│    Sign Up      │                 └──────┬───────┘
-│  /auth/signup   │                        │
-└─────────────────┘                        ▼
-                                    ┌──────────────┐
-                                    │Check user_type│
-                                    └──────┬───────┘
-                                           │
-                     ┌─────────────────────┼─────────────────┐
-                     ▼                     ▼                 ▼
-              ┌─────────────┐      ┌─────────────┐  ┌─────────────┐
-              │ Customer UI │      │ Courier UI  │  │ Seller UI   │
-              └─────────────┘      └─────────────┘  └─────────────┘
-```
-
----
-
-## Implementation Steps
-
-### Step 1: Create Unified Authentication Service
-
-Create a file: `src/services/authService.js`
-
-```javascript
-import api from './api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-class AuthService {
-  /**
-   * Sign up a new courier (courier-specific)
-   * @param {Object} data - Courier signup data
-   * @returns {Promise}
-   */
-  async signupCourier(data) {
-    try {
-      const response = await api.post('/courier/signup', {
-        email: data.email,
-        password: data.password,
-        name: data.name,
-        phone_number: data.phone_number,
-        country: data.country,
-        city: data.city,
-        address: data.address,
-        vehicle_type: data.vehicle_type, // BICYCLE, MOTORCYCLE, CAR, VAN, TRUCK
-        vehicle_number: data.vehicle_number,
-        license_number: data.license_number,
-      });
-
-      return response.data;
-    } catch (error) {
-      throw this.handleError(error);
-    }
-  }
-
-  /**
-   * Sign up a regular user (customer/seller)
-   * @param {Object} data - User signup data
-   * @returns {Promise}
-   */
-  async signup(data) {
-    try {
-      const response = await api.post('/auth/signup', {
-        email: data.email,
-        password: data.password,
-        name: data.name,
-        phone_number: data.phone_number,
-        country: data.country,
-        city: data.city,
-        address: data.address,
-        business_name: data.business_name,
-        business_description: data.business_description,
-        role: data.role || 'CUSTOMER', // CUSTOMER or SELLER
-      });
-
-      const { user, access_token, refresh_token } = response.data;
-
-      // Store tokens and user data
-      await this.storeAuthData(access_token, refresh_token, user);
-
-      return response.data;
-    } catch (error) {
-      throw this.handleError(error);
-    }
-  }
-
-  /**
-   * Login user (works for all user types)
-   * @param {string} email
-   * @param {string} password
-   * @returns {Promise}
-   */
-  async login(email, password) {
-    try {
-      const response = await api.post('/auth/login', {
-        email,
-        password,
-      });
-
-      const { user, access_token, refresh_token } = response.data;
-
-      // Store tokens and user data
-      await this.storeAuthData(access_token, refresh_token, user);
-
-      return response.data;
-    } catch (error) {
-      throw this.handleError(error);
-    }
-  }
-
-  /**
-   * Logout user
-   * @returns {Promise}
-   */
-  async logout() {
-    try {
-      await api.post('/auth/logout');
-    } catch (error) {
-      console.error('Logout error:', error);
-    } finally {
-      // Clear local storage
-      await AsyncStorage.multiRemove([
-        'access_token',
-        'refresh_token',
-        'user',
-      ]);
-    }
-  }
-
-  /**
-   * Refresh access token
-   * @returns {Promise}
-   */
-  async refreshToken() {
-    try {
-      const refreshToken = await AsyncStorage.getItem('refresh_token');
-
-      if (!refreshToken) {
-        throw new Error('No refresh token available');
-      }
-
-      const response = await api.post('/auth/refresh', {
-        refresh_token: refreshToken,
-      });
-
-      const { access_token, refresh_token: new_refresh_token } = response.data;
-
-      await AsyncStorage.setItem('access_token', access_token);
-      await AsyncStorage.setItem('refresh_token', new_refresh_token);
-
-      return response.data;
-    } catch (error) {
-      throw this.handleError(error);
-    }
-  }
-
-  /**
-   * Validate current token
-   * @returns {Promise}
-   */
-  async validateToken() {
-    try {
-      const response = await api.get('/auth/status');
-      return response.data;
-    } catch (error) {
-      throw this.handleError(error);
-    }
-  }
-
-  /**
-   * Request password reset OTP
-   * @param {string} email
-   * @returns {Promise}
-   */
-  async requestPasswordReset(email) {
-    try {
-      const response = await api.post('/auth/password-reset/request', {
-        email,
-      });
-      return response.data;
-    } catch (error) {
-      throw this.handleError(error);
-    }
-  }
-
-  /**
-   * Verify OTP code
-   * @param {string} email
-   * @param {string} token
-   * @returns {Promise}
-   */
-  async verifyOTP(email, token) {
-    try {
-      const response = await api.post('/auth/password-reset/verify-otp', {
-        email,
-        token,
-      });
-      return response.data;
-    } catch (error) {
-      throw this.handleError(error);
-    }
-  }
-
-  /**
-   * Complete password reset
-   * @param {string} email
-   * @param {string} token
-   * @param {string} newPassword
-   * @returns {Promise}
-   */
-  async completePasswordReset(email, token, newPassword) {
-    try {
-      const response = await api.post('/auth/password-reset/complete', {
-        email,
-        token,
-        new_password: newPassword,
-      });
-      return response.data;
-    } catch (error) {
-      throw this.handleError(error);
-    }
-  }
-
-  /**
-   * Get current user data
-   * @returns {Promise}
-   */
-  async getCurrentUser() {
-    try {
-      const userJson = await AsyncStorage.getItem('user');
-      return userJson ? JSON.parse(userJson) : null;
-    } catch (error) {
-      console.error('Error getting current user:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Check if user is authenticated
-   * @returns {Promise<boolean>}
-   */
-  async isAuthenticated() {
-    try {
-      const token = await AsyncStorage.getItem('access_token');
-      return !!token;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  /**
-   * Get user type (CUSTOMER, SELLER, COURIER)
-   * @returns {Promise<string|null>}
-   */
   async getUserType() {
-    try {
-      const user = await this.getCurrentUser();
-      return user?.user_type || user?.role || null;
-    } catch (error) {
-      return null;
-    }
-  }
+    return await AsyncStorage.getItem('user_type');
+  },
 
-  /**
-   * Store authentication data
-   * @private
-   */
-  async storeAuthData(accessToken, refreshToken, user) {
-    await AsyncStorage.multiSet([
-      ['access_token', accessToken],
-      ['refresh_token', refreshToken],
-      ['user', JSON.stringify(user)],
-    ]);
-  }
+  async logout() {
+    await AsyncStorage.multiRemove(['access_token', 'user_type', 'user_data']);
+  },
+};
+```
 
-  /**
-   * Handle API errors
-   * @private
-   */
-  handleError(error) {
-    if (error.response) {
-      // Server responded with error
-      const message = error.response.data?.detail || error.response.data?.message || 'An error occurred';
-      return new Error(message);
-    } else if (error.request) {
-      // Request made but no response
-      return new Error('Network error. Please check your connection.');
-    } else {
-      // Something else happened
-      return new Error(error.message || 'An unexpected error occurred');
-    }
-  }
+---
+
+## 2. API Service Configuration
+
+### Create a Delivery Service
+
+```typescript
+// services/deliveryService.ts
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const API_URL = 'YOUR_API_URL'; // e.g., http://192.168.1.100:8080
+
+export interface Address {
+  street: string;
+  city: string;
+  state: string;
+  country: string;
+  postal_code?: string;
+  latitude?: number;
+  longitude?: number;
 }
 
-export default new AuthService();
+export interface Delivery {
+  id: string;
+  order_id: string;
+  courier_id?: string;
+  pickup_address: Address;
+  delivery_address: Address;
+  pickup_contact_name?: string;
+  pickup_contact_phone?: string;
+  delivery_contact_name?: string;
+  delivery_contact_phone?: string;
+  delivery_fee: number;
+  courier_fee: number;
+  status: 'PENDING' | 'ACCEPTED' | 'PICKED_UP' | 'IN_TRANSIT' | 'DELIVERED' | 'CANCELLED';
+  priority: 'STANDARD' | 'EXPRESS' | 'URGENT';
+  notes?: string;
+  courier_notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export const deliveryService = {
+  // Get auth headers
+  async getHeaders() {
+    const token = await AsyncStorage.getItem('access_token');
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    };
+  },
+
+  // COURIER: Get available deliveries
+  async getAvailableDeliveries(page = 1, pageSize = 20, priority?: string) {
+    const headers = await this.getHeaders();
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+      ...(priority && { priority }),
+    });
+
+    const response = await fetch(
+      `${API_URL}/api/deliveries/available?${params}`,
+      { headers }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to fetch available deliveries');
+    }
+
+    return await response.json();
+  },
+
+  // COURIER: Get my accepted deliveries
+  async getCourierDeliveries(page = 1, pageSize = 20, status?: string) {
+    const headers = await this.getHeaders();
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+      ...(status && { status }),
+    });
+
+    const response = await fetch(
+      `${API_URL}/api/deliveries/courier/my-deliveries?${params}`,
+      { headers }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to fetch courier deliveries');
+    }
+
+    return await response.json();
+  },
+
+  // COURIER: Accept a delivery
+  async acceptDelivery(
+    deliveryId: string,
+    estimatedPickupTime?: Date,
+    estimatedDeliveryTime?: Date
+  ) {
+    const headers = await this.getHeaders();
+    const response = await fetch(`${API_URL}/api/deliveries/accept`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        delivery_id: deliveryId,
+        estimated_pickup_time: estimatedPickupTime?.toISOString(),
+        estimated_delivery_time: estimatedDeliveryTime?.toISOString(),
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to accept delivery');
+    }
+
+    return await response.json();
+  },
+
+  // COURIER: Update delivery status
+  async updateDeliveryStatus(
+    deliveryId: string,
+    status: 'PICKED_UP' | 'IN_TRANSIT' | 'DELIVERED',
+    notes?: string,
+    location?: { latitude: number; longitude: number },
+    proofOfDeliveryUrls?: string[],
+    customerSignature?: string
+  ) {
+    const headers = await this.getHeaders();
+    const response = await fetch(
+      `${API_URL}/api/deliveries/${deliveryId}/status`,
+      {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          status,
+          notes,
+          location,
+          proof_of_delivery_urls: proofOfDeliveryUrls,
+          customer_signature: customerSignature,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to update delivery status');
+    }
+
+    return await response.json();
+  },
+
+  // CUSTOMER: Get my scheduled deliveries
+  async getMyDeliveries(page = 1, pageSize = 20, status?: string) {
+    const headers = await this.getHeaders();
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+      ...(status && { status }),
+    });
+
+    const response = await fetch(
+      `${API_URL}/api/deliveries/my-deliveries?${params}`,
+      { headers }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to fetch my deliveries');
+    }
+
+    return await response.json();
+  },
+
+  // CUSTOMER: Get delivery details with courier info
+  async getDeliveryDetails(deliveryId: string) {
+    const headers = await this.getHeaders();
+    const response = await fetch(
+      `${API_URL}/api/deliveries/${deliveryId}`,
+      { headers }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to fetch delivery details');
+    }
+
+    return await response.json();
+  },
+
+  // CUSTOMER: Get courier details for a delivery
+  async getCourierDetails(deliveryId: string) {
+    const headers = await this.getHeaders();
+    const response = await fetch(
+      `${API_URL}/api/deliveries/${deliveryId}/courier`,
+      { headers }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to fetch courier details');
+    }
+
+    return await response.json();
+  },
+
+  // CUSTOMER: Schedule a delivery
+  async scheduleDelivery(deliveryData: {
+    pickup_address: Address;
+    delivery_address: Address;
+    pickup_contact_name: string;
+    pickup_contact_phone: string;
+    delivery_contact_name: string;
+    delivery_contact_phone: string;
+    priority: 'STANDARD' | 'EXPRESS' | 'URGENT';
+    notes?: string;
+    scheduled_date?: Date;
+  }) {
+    const headers = await this.getHeaders();
+    const response = await fetch(`${API_URL}/api/deliveries/schedule`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        ...deliveryData,
+        scheduled_date: deliveryData.scheduled_date?.toISOString(),
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to schedule delivery');
+    }
+
+    return await response.json();
+  },
+};
 ```
 
 ---
 
-## Code Examples
+## 3. Courier Screens
 
-### Example 1: Courier Sign Up Screen
+### 3.1 Available Deliveries Screen (Courier)
 
-```javascript
-import React, { useState } from 'react';
-import { View, TextInput, Button, Alert, ScrollView, Picker } from 'react-native';
-import authService from '../services/authService';
+```typescript
+// screens/courier/AvailableDeliveriesScreen.tsx
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  RefreshControl,
+  StyleSheet,
+  Alert,
+} from 'react-native';
+import { deliveryService, Delivery } from '../../services/deliveryService';
 
-const CourierSignUpScreen = ({ navigation }) => {
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-    name: '',
-    phone_number: '',
-    country: '',
-    city: '',
-    address: '',
-    vehicle_type: 'MOTORCYCLE',
-    vehicle_number: '',
-    license_number: '',
-  });
+export default function AvailableDeliveriesScreen({ navigation }) {
+  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [page, setPage] = useState(1);
 
-  const handleSignUp = async () => {
-    setLoading(true);
+  useEffect(() => {
+    loadDeliveries();
+  }, []);
+
+  const loadDeliveries = async () => {
     try {
-      const result = await authService.signupCourier(formData);
-      Alert.alert(
-        'Success',
-        result.message || 'Account created successfully! Please verify your email.',
-        [
-          {
-            text: 'OK',
-            onPress: () => navigation.navigate('Login')
-          }
-        ]
-      );
-    } catch (error) {
+      setLoading(true);
+      const response = await deliveryService.getAvailableDeliveries(page, 20);
+      setDeliveries(response.deliveries || []);
+    } catch (error: any) {
       Alert.alert('Error', error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <ScrollView style={{ padding: 20 }}>
-      <TextInput
-        placeholder="Email"
-        value={formData.email}
-        onChangeText={(text) => setFormData({ ...formData, email: text })}
-        keyboardType="email-address"
-        autoCapitalize="none"
-      />
-      <TextInput
-        placeholder="Password"
-        value={formData.password}
-        onChangeText={(text) => setFormData({ ...formData, password: text })}
-        secureTextEntry
-      />
-      <TextInput
-        placeholder="Full Name"
-        value={formData.name}
-        onChangeText={(text) => setFormData({ ...formData, name: text })}
-      />
-      <TextInput
-        placeholder="Phone Number"
-        value={formData.phone_number}
-        onChangeText={(text) => setFormData({ ...formData, phone_number: text })}
-        keyboardType="phone-pad"
-      />
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadDeliveries();
+    setRefreshing(false);
+  };
 
-      <Picker
-        selectedValue={formData.vehicle_type}
-        onValueChange={(value) => setFormData({ ...formData, vehicle_type: value })}
-      >
-        <Picker.Item label="Bicycle" value="BICYCLE" />
-        <Picker.Item label="Motorcycle" value="MOTORCYCLE" />
-        <Picker.Item label="Car" value="CAR" />
-        <Picker.Item label="Van" value="VAN" />
-        <Picker.Item label="Truck" value="TRUCK" />
-      </Picker>
+  const handleAcceptDelivery = async (deliveryId: string) => {
+    Alert.alert(
+      'Accept Delivery',
+      'Are you sure you want to accept this delivery?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Accept',
+          onPress: async () => {
+            try {
+              await deliveryService.acceptDelivery(deliveryId);
+              Alert.alert('Success', 'Delivery accepted successfully!');
+              loadDeliveries(); // Refresh list
+              navigation.navigate('MyDeliveries');
+            } catch (error: any) {
+              Alert.alert('Error', error.message);
+            }
+          },
+        },
+      ]
+    );
+  };
 
-      <TextInput
-        placeholder="Vehicle Number"
-        value={formData.vehicle_number}
-        onChangeText={(text) => setFormData({ ...formData, vehicle_number: text })}
-      />
-      <TextInput
-        placeholder="License Number"
-        value={formData.license_number}
-        onChangeText={(text) => setFormData({ ...formData, license_number: text })}
-      />
+  const renderDeliveryCard = ({ item }: { item: Delivery }) => (
+    <TouchableOpacity
+      style={styles.card}
+      onPress={() => navigation.navigate('DeliveryDetails', { deliveryId: item.id })}
+    >
+      <View style={styles.cardHeader}>
+        <Text style={styles.deliveryId}>#{item.id.slice(0, 8)}</Text>
+        <View style={[styles.priorityBadge, getPriorityStyle(item.priority)]}>
+          <Text style={styles.priorityText}>{item.priority}</Text>
+        </View>
+      </View>
 
-      <Button
-        title={loading ? 'Signing Up...' : 'Sign Up as Courier'}
-        onPress={handleSignUp}
-        disabled={loading}
-      />
-    </ScrollView>
+      <View style={styles.addressContainer}>
+        <Text style={styles.label}>Pickup:</Text>
+        <Text style={styles.address}>
+          {item.pickup_address.street}, {item.pickup_address.city}
+        </Text>
+      </View>
+
+      <View style={styles.addressContainer}>
+        <Text style={styles.label}>Delivery:</Text>
+        <Text style={styles.address}>
+          {item.delivery_address.street}, {item.delivery_address.city}
+        </Text>
+      </View>
+
+      <View style={styles.footer}>
+        <Text style={styles.fee}>Your Earnings: GHS {item.courier_fee}</Text>
+        <TouchableOpacity
+          style={styles.acceptButton}
+          onPress={() => handleAcceptDelivery(item.id)}
+        >
+          <Text style={styles.acceptButtonText}>Accept</Text>
+        </TouchableOpacity>
+      </View>
+    </TouchableOpacity>
   );
-};
 
-export default CourierSignUpScreen;
-```
-
-### Example 2: Unified Login Screen
-
-```javascript
-import React, { useState } from 'react';
-import { View, TextInput, Button, Alert, StyleSheet } from 'react-native';
-import authService from '../services/authService';
-
-const LoginScreen = ({ navigation }) => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Error', 'Please enter email and password');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const result = await authService.login(email, password);
-
-      // Check user type and navigate accordingly
-      const userType = result.user.user_type || result.user.role;
-
-      switch (userType) {
-        case 'COURIER':
-          navigation.replace('CourierHome');
-          break;
-        case 'SELLER':
-          navigation.replace('SellerHome');
-          break;
-        case 'CUSTOMER':
-        default:
-          navigation.replace('CustomerHome');
-          break;
-      }
-    } catch (error) {
-      Alert.alert('Login Failed', error.message);
-    } finally {
-      setLoading(false);
+  const getPriorityStyle = (priority: string) => {
+    switch (priority) {
+      case 'URGENT':
+        return { backgroundColor: '#ff4444' };
+      case 'EXPRESS':
+        return { backgroundColor: '#ff9500' };
+      default:
+        return { backgroundColor: '#4CAF50' };
     }
   };
 
   return (
     <View style={styles.container}>
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        value={email}
-        onChangeText={setEmail}
-        keyboardType="email-address"
-        autoCapitalize="none"
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-      />
-      <Button
-        title={loading ? 'Logging in...' : 'Login'}
-        onPress={handleLogin}
-        disabled={loading}
-      />
-      <Button
-        title="Forgot Password?"
-        onPress={() => navigation.navigate('ForgotPassword')}
-      />
-      <Button
-        title="Sign Up as Customer/Seller"
-        onPress={() => navigation.navigate('SignUp')}
-      />
-      <Button
-        title="Sign Up as Courier"
-        onPress={() => navigation.navigate('CourierSignUp')}
+      <FlatList
+        data={deliveries}
+        renderItem={renderDeliveryCard}
+        keyExtractor={(item) => item.id}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No available deliveries</Text>
+          </View>
+        }
       />
     </View>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
-    justifyContent: 'center',
+    backgroundColor: '#f5f5f5',
   },
-  input: {
-    height: 50,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingHorizontal: 15,
-    marginBottom: 15,
+  card: {
+    backgroundColor: 'white',
+    margin: 10,
+    padding: 15,
+    borderRadius: 10,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  deliveryId: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  priorityBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 5,
+  },
+  priorityText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  addressContainer: {
+    marginBottom: 10,
+  },
+  label: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 2,
+  },
+  address: {
+    fontSize: 14,
+    color: '#333',
+  },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  fee: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+  },
+  acceptButton: {
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 5,
+  },
+  acceptButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#666',
   },
 });
-
-export default LoginScreen;
 ```
 
-### Example 3: Authentication Context with User Type Detection
+### 3.2 My Deliveries Screen (Courier)
 
-Create a file: `src/context/AuthContext.js`
+```typescript
+// screens/courier/MyDeliveriesScreen.tsx
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  RefreshControl,
+  StyleSheet,
+  Alert,
+} from 'react-native';
+import { deliveryService, Delivery } from '../../services/deliveryService';
 
-```javascript
-import React, { createContext, useState, useEffect, useContext } from 'react';
-import authService from '../services/authService';
-
-const AuthContext = createContext();
-
-export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userType, setUserType] = useState(null);
+export default function MyDeliveriesScreen({ navigation }) {
+  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [filterStatus, setFilterStatus] = useState<string | undefined>(undefined);
 
   useEffect(() => {
-    checkAuth();
-  }, []);
+    loadDeliveries();
+  }, [filterStatus]);
 
-  const checkAuth = async () => {
+  const loadDeliveries = async () => {
     try {
-      const authenticated = await authService.isAuthenticated();
-      setIsAuthenticated(authenticated);
-
-      if (authenticated) {
-        const userData = await authService.getCurrentUser();
-        setUser(userData);
-        setUserType(userData?.user_type || userData?.role);
-      }
-    } catch (error) {
-      console.error('Auth check error:', error);
+      setLoading(true);
+      const response = await deliveryService.getCourierDeliveries(1, 20, filterStatus);
+      setDeliveries(response.deliveries || []);
+    } catch (error: any) {
+      Alert.alert('Error', error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const login = async (email, password) => {
-    const result = await authService.login(email, password);
-    setUser(result.user);
-    setUserType(result.user?.user_type || result.user?.role);
-    setIsAuthenticated(true);
-    return result;
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadDeliveries();
+    setRefreshing(false);
   };
 
-  const signupCourier = async (data) => {
-    const result = await authService.signupCourier(data);
-    // Note: Courier signup doesn't auto-login, user needs to verify email first
-    return result;
+  const handleUpdateStatus = async (
+    deliveryId: string,
+    currentStatus: string
+  ) => {
+    let nextStatus: 'PICKED_UP' | 'IN_TRANSIT' | 'DELIVERED';
+
+    if (currentStatus === 'ACCEPTED') {
+      nextStatus = 'PICKED_UP';
+    } else if (currentStatus === 'PICKED_UP') {
+      nextStatus = 'IN_TRANSIT';
+    } else if (currentStatus === 'IN_TRANSIT') {
+      nextStatus = 'DELIVERED';
+    } else {
+      return;
+    }
+
+    Alert.alert(
+      'Update Status',
+      `Change status to ${nextStatus}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Update',
+          onPress: async () => {
+            try {
+              await deliveryService.updateDeliveryStatus(deliveryId, nextStatus);
+              Alert.alert('Success', 'Status updated successfully!');
+              loadDeliveries();
+            } catch (error: any) {
+              Alert.alert('Error', error.message);
+            }
+          },
+        },
+      ]
+    );
   };
 
-  const signup = async (data) => {
-    const result = await authService.signup(data);
-    setUser(result.user);
-    setUserType(result.user?.user_type || result.user?.role);
-    setIsAuthenticated(true);
-    return result;
-  };
+  const renderDeliveryCard = ({ item }: { item: Delivery }) => (
+    <TouchableOpacity
+      style={styles.card}
+      onPress={() => navigation.navigate('DeliveryDetails', { deliveryId: item.id })}
+    >
+      <View style={styles.cardHeader}>
+        <Text style={styles.deliveryId}>#{item.id.slice(0, 8)}</Text>
+        <View style={[styles.statusBadge, getStatusStyle(item.status)]}>
+          <Text style={styles.statusText}>{item.status}</Text>
+        </View>
+      </View>
 
-  const logout = async () => {
-    await authService.logout();
-    setUser(null);
-    setUserType(null);
-    setIsAuthenticated(false);
-  };
+      <View style={styles.addressContainer}>
+        <Text style={styles.label}>Pickup:</Text>
+        <Text style={styles.address}>
+          {item.pickup_address.street}, {item.pickup_address.city}
+        </Text>
+      </View>
 
-  const isCourier = () => userType === 'COURIER';
-  const isSeller = () => userType === 'SELLER';
-  const isCustomer = () => userType === 'CUSTOMER';
+      <View style={styles.addressContainer}>
+        <Text style={styles.label}>Delivery:</Text>
+        <Text style={styles.address}>
+          {item.delivery_address.street}, {item.delivery_address.city}
+        </Text>
+      </View>
+
+      <View style={styles.footer}>
+        <Text style={styles.fee}>GHS {item.courier_fee}</Text>
+        {item.status !== 'DELIVERED' && item.status !== 'CANCELLED' && (
+          <TouchableOpacity
+            style={styles.updateButton}
+            onPress={() => handleUpdateStatus(item.id, item.status)}
+          >
+            <Text style={styles.updateButtonText}>Update Status</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+
+  const getStatusStyle = (status: string) => {
+    switch (status) {
+      case 'DELIVERED':
+        return { backgroundColor: '#4CAF50' };
+      case 'IN_TRANSIT':
+        return { backgroundColor: '#2196F3' };
+      case 'PICKED_UP':
+        return { backgroundColor: '#FF9800' };
+      case 'ACCEPTED':
+        return { backgroundColor: '#9C27B0' };
+      default:
+        return { backgroundColor: '#757575' };
+    }
+  };
 
   return (
-    <AuthContext.Provider
+    <View style={styles.container}>
+      <FlatList
+        data={deliveries}
+        renderItem={renderDeliveryCard}
+        keyExtractor={(item) => item.id}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No deliveries yet</Text>
+          </View>
+        }
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  card: {
+    backgroundColor: 'white',
+    margin: 10,
+    padding: 15,
+    borderRadius: 10,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  deliveryId: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 5,
+  },
+  statusText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  addressContainer: {
+    marginBottom: 10,
+  },
+  label: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 2,
+  },
+  address: {
+    fontSize: 14,
+    color: '#333',
+  },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  fee: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+  },
+  updateButton: {
+    backgroundColor: '#FF9800',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 5,
+  },
+  updateButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#666',
+  },
+});
+```
+
+---
+
+## 4. Customer Screens
+
+### 4.1 My Deliveries Screen (Customer)
+
+```typescript
+// screens/customer/MyDeliveriesScreen.tsx
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  RefreshControl,
+  StyleSheet,
+  Alert,
+} from 'react-native';
+import { deliveryService, Delivery } from '../../services/deliveryService';
+
+export default function CustomerDeliveriesScreen({ navigation }) {
+  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    loadDeliveries();
+  }, []);
+
+  const loadDeliveries = async () => {
+    try {
+      const response = await deliveryService.getMyDeliveries(1, 20);
+      setDeliveries(response.deliveries || []);
+    } catch (error: any) {
+      Alert.alert('Error', error.message);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadDeliveries();
+    setRefreshing(false);
+  };
+
+  const renderDeliveryCard = ({ item }: { item: Delivery }) => (
+    <TouchableOpacity
+      style={styles.card}
+      onPress={() =>
+        navigation.navigate('DeliveryTracking', { deliveryId: item.id })
+      }
+    >
+      <View style={styles.cardHeader}>
+        <Text style={styles.deliveryId}>#{item.id.slice(0, 8)}</Text>
+        <View style={[styles.statusBadge, getStatusStyle(item.status)]}>
+          <Text style={styles.statusText}>{item.status}</Text>
+        </View>
+      </View>
+
+      <View style={styles.addressContainer}>
+        <Text style={styles.label}>From:</Text>
+        <Text style={styles.address}>
+          {item.pickup_address.street}, {item.pickup_address.city}
+        </Text>
+      </View>
+
+      <View style={styles.addressContainer}>
+        <Text style={styles.label}>To:</Text>
+        <Text style={styles.address}>
+          {item.delivery_address.street}, {item.delivery_address.city}
+        </Text>
+      </View>
+
+      <View style={styles.footer}>
+        <Text style={styles.fee}>Fee: GHS {item.delivery_fee}</Text>
+        {item.courier_id && (
+          <TouchableOpacity
+            style={styles.courierButton}
+            onPress={() =>
+              navigation.navigate('CourierDetails', {
+                deliveryId: item.id,
+              })
+            }
+          >
+            <Text style={styles.courierButtonText}>View Courier</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+
+  const getStatusStyle = (status: string) => {
+    switch (status) {
+      case 'DELIVERED':
+        return { backgroundColor: '#4CAF50' };
+      case 'IN_TRANSIT':
+        return { backgroundColor: '#2196F3' };
+      case 'PICKED_UP':
+        return { backgroundColor: '#FF9800' };
+      case 'ACCEPTED':
+        return { backgroundColor: '#9C27B0' };
+      case 'PENDING':
+        return { backgroundColor: '#FFC107' };
+      default:
+        return { backgroundColor: '#757575' };
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <FlatList
+        data={deliveries}
+        renderItem={renderDeliveryCard}
+        keyExtractor={(item) => item.id}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No deliveries yet</Text>
+          </View>
+        }
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  card: {
+    backgroundColor: 'white',
+    margin: 10,
+    padding: 15,
+    borderRadius: 10,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  deliveryId: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 5,
+  },
+  statusText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  addressContainer: {
+    marginBottom: 10,
+  },
+  label: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 2,
+  },
+  address: {
+    fontSize: 14,
+    color: '#333',
+  },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  fee: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#666',
+  },
+  courierButton: {
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 5,
+  },
+  courierButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#666',
+  },
+});
+```
+
+### 4.2 Courier Details Screen (Customer)
+
+```typescript
+// screens/customer/CourierDetailsScreen.tsx
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ActivityIndicator,
+  TouchableOpacity,
+  Linking,
+  Alert,
+} from 'react-native';
+import { deliveryService } from '../../services/deliveryService';
+
+export default function CourierDetailsScreen({ route }) {
+  const { deliveryId } = route.params;
+  const [courierData, setCourierData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadCourierDetails();
+  }, []);
+
+  const loadCourierDetails = async () => {
+    try {
+      const data = await deliveryService.getCourierDetails(deliveryId);
+      setCourierData(data);
+    } catch (error: any) {
+      Alert.alert('Error', error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCall = (phoneNumber: string) => {
+    Linking.openURL(`tel:${phoneNumber}`);
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#2196F3" />
+      </View>
+    );
+  }
+
+  if (!courierData?.courier_assigned) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.emptyText}>
+          {courierData?.message || 'No courier assigned yet'}
+        </Text>
+      </View>
+    );
+  }
+
+  const { courier } = courierData;
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.card}>
+        <View style={styles.header}>
+          <Text style={styles.courierCode}>{courier.courier_code}</Text>
+          <View style={styles.ratingContainer}>
+            <Text style={styles.rating}>⭐ {courier.rating.toFixed(1)}</Text>
+          </View>
+        </View>
+
+        <View style={styles.infoRow}>
+          <Text style={styles.label}>Name:</Text>
+          <Text style={styles.value}>{courier.name}</Text>
+        </View>
+
+        <View style={styles.infoRow}>
+          <Text style={styles.label}>Vehicle:</Text>
+          <Text style={styles.value}>
+            {courier.vehicle_type} - {courier.vehicle_number}
+          </Text>
+        </View>
+
+        <View style={styles.infoRow}>
+          <Text style={styles.label}>Experience:</Text>
+          <Text style={styles.value}>
+            {courier.completed_deliveries} / {courier.total_deliveries} deliveries
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          style={styles.callButton}
+          onPress={() => handleCall(courier.phone_number)}
+        >
+          <Text style={styles.callButtonText}>📞 Call Courier</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    padding: 15,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  card: {
+    backgroundColor: 'white',
+    borderRadius: 10,
+    padding: 20,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  courierCode: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  ratingContainer: {
+    backgroundColor: '#FFC107',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 5,
+  },
+  rating: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 15,
+  },
+  label: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  value: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: 'bold',
+  },
+  callButton: {
+    backgroundColor: '#4CAF50',
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  callButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 50,
+  },
+});
+```
+
+---
+
+## 5. State Management
+
+### Using Context API (Optional)
+
+```typescript
+// context/DeliveryContext.tsx
+import React, { createContext, useState, useContext, useEffect } from 'react';
+import { deliveryService, Delivery } from '../services/deliveryService';
+
+interface DeliveryContextType {
+  availableDeliveries: Delivery[];
+  myDeliveries: Delivery[];
+  loading: boolean;
+  refreshAvailable: () => Promise<void>;
+  refreshMyDeliveries: () => Promise<void>;
+  acceptDelivery: (deliveryId: string) => Promise<void>;
+  updateStatus: (deliveryId: string, status: string) => Promise<void>;
+}
+
+const DeliveryContext = createContext<DeliveryContextType | undefined>(undefined);
+
+export const DeliveryProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
+  const [availableDeliveries, setAvailableDeliveries] = useState<Delivery[]>([]);
+  const [myDeliveries, setMyDeliveries] = useState<Delivery[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const refreshAvailable = async () => {
+    try {
+      setLoading(true);
+      const response = await deliveryService.getAvailableDeliveries();
+      setAvailableDeliveries(response.deliveries || []);
+    } catch (error) {
+      console.error('Error loading available deliveries:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const refreshMyDeliveries = async () => {
+    try {
+      setLoading(true);
+      const response = await deliveryService.getCourierDeliveries();
+      setMyDeliveries(response.deliveries || []);
+    } catch (error) {
+      console.error('Error loading my deliveries:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const acceptDelivery = async (deliveryId: string) => {
+    await deliveryService.acceptDelivery(deliveryId);
+    await refreshAvailable();
+    await refreshMyDeliveries();
+  };
+
+  const updateStatus = async (deliveryId: string, status: any) => {
+    await deliveryService.updateDeliveryStatus(deliveryId, status);
+    await refreshMyDeliveries();
+  };
+
+  return (
+    <DeliveryContext.Provider
       value={{
-        user,
-        userType,
-        isAuthenticated,
+        availableDeliveries,
+        myDeliveries,
         loading,
-        login,
-        signup,
-        signupCourier,
-        logout,
-        refreshUser: checkAuth,
-        isCourier,
-        isSeller,
-        isCustomer,
+        refreshAvailable,
+        refreshMyDeliveries,
+        acceptDelivery,
+        updateStatus,
       }}
     >
       {children}
-    </AuthContext.Provider>
+    </DeliveryContext.Provider>
   );
 };
 
-export const useAuth = () => {
-  const context = useContext(AuthContext);
+export const useDelivery = () => {
+  const context = useContext(DeliveryContext);
   if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
+    throw new Error('useDelivery must be used within DeliveryProvider');
   }
   return context;
 };
@@ -756,162 +1255,126 @@ export const useAuth = () => {
 
 ---
 
-## User Type Detection
+## 6. Real-time Updates (Optional)
 
-The API returns `user_type` field in the user object:
+### Using Polling
 
-```javascript
-{
-  "user": {
-    "user_id": "uuid",
-    "name": "John Doe",
-    "email": "john@example.com",
-    "user_type": "COURIER",  // CUSTOMER, SELLER, or COURIER
-    "courier_profile": {      // Only present if user_type is COURIER
-      "courier_id": "uuid",
-      "courier_code": "COU-ABC123",
-      "vehicle_type": "MOTORCYCLE",
-      "rating": 4.8,
-      "is_verified": true
-    }
-  }
-}
-```
+```typescript
+// hooks/useDeliveryPolling.ts
+import { useEffect, useRef } from 'react';
 
-### Conditional Navigation Based on User Type
+export const useDeliveryPolling = (
+  refreshFunction: () => Promise<void>,
+  interval = 30000 // 30 seconds
+) => {
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-```javascript
-const navigateBasedOnUserType = (user) => {
-  const userType = user.user_type || user.role;
+  useEffect(() => {
+    // Initial fetch
+    refreshFunction();
 
-  switch (userType) {
-    case 'COURIER':
-      return navigation.replace('CourierDashboard');
-    case 'SELLER':
-      return navigation.replace('SellerDashboard');
-    case 'CUSTOMER':
-    default:
-      return navigation.replace('Home');
-  }
+    // Set up polling
+    intervalRef.current = setInterval(() => {
+      refreshFunction();
+    }, interval);
+
+    // Cleanup
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [refreshFunction, interval]);
 };
-```
 
-### Conditional UI Rendering
-
-```javascript
-const HomeScreen = () => {
-  const { user, isCourier, isSeller, isCustomer } = useAuth();
-
-  return (
-    <View>
-      {isCourier() && <CourierDashboard />}
-      {isSeller() && <SellerDashboard />}
-      {isCustomer() && <CustomerDashboard />}
-    </View>
-  );
-};
+// Usage in component:
+// useDeliveryPolling(loadDeliveries, 30000);
 ```
 
 ---
 
-## Error Handling
+## 7. Testing
 
-Same as before - unified across all user types.
+### Test Endpoints with your React Native app
 
----
-
-## Best Practices
-
-### 1. Single Sign-In Flow
-- Use the same login screen for all user types
-- Detect user type after successful login
-- Route to appropriate dashboard based on `user_type`
-
-### 2. User Type Checking
-```javascript
-// Always check user_type field
-const userType = user.user_type || user.role;
-
-// Use helper functions
-if (authContext.isCourier()) {
-  // Show courier-specific features
-}
-```
-
-### 3. Courier Profile Access
-```javascript
-// Check if courier profile exists
-if (user.user_type === 'COURIER' && user.courier_profile) {
-  const courierCode = user.courier_profile.courier_code;
-  const rating = user.courier_profile.rating;
-  // Use courier data
-}
-```
+1. **Login as Courier**
+2. **Navigate to Available Deliveries**
+3. **Accept a delivery**
+4. **Update delivery status**
+5. **Login as Customer**
+6. **View your deliveries**
+7. **Check courier details**
 
 ---
 
-## API Response Examples
+## Summary of All Endpoints
 
-### Courier Login Response
-```json
-{
-  "user": {
-    "user_id": "uuid",
-    "name": "John Doe",
-    "email": "courier@example.com",
-    "phone_number": "+1234567890",
-    "user_type": "COURIER",
-    "verified": true,
-    "role": "COURIER",
-    "courier_profile": {
-      "courier_id": "uuid",
-      "courier_code": "COU-ABC123",
-      "vehicle_type": "MOTORCYCLE",
-      "vehicle_number": "GH-1234-20",
-      "license_number": "DL-12345",
-      "rating": 4.8,
-      "total_deliveries": 150,
-      "completed_deliveries": 148,
-      "is_available": true,
-      "is_verified": true
-    }
-  },
-  "access_token": "eyJ...",
-  "refresh_token": "eyJ...",
-  "token_type": "bearer"
-}
-```
+### Courier Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/deliveries/available` | Get available deliveries to accept |
+| GET | `/api/deliveries/courier/my-deliveries` | Get courier's accepted deliveries |
+| POST | `/api/deliveries/accept` | Accept a delivery |
+| PUT | `/api/deliveries/{delivery_id}/status` | Update delivery status |
 
-### Customer/Seller Login Response
-```json
-{
-  "user": {
-    "user_id": "uuid",
-    "name": "Jane Smith",
-    "email": "customer@example.com",
-    "user_type": "CUSTOMER",
-    "verified": true,
-    "role": "CUSTOMER",
-    "courier_profile": null
-  },
-  "access_token": "eyJ...",
-  "refresh_token": "eyJ...",
-  "token_type": "bearer"
-}
-```
+### Customer Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/deliveries/schedule` | Schedule a new delivery |
+| GET | `/api/deliveries/my-deliveries` | Get user's scheduled deliveries |
+| GET | `/api/deliveries/{delivery_id}` | Get delivery details |
+| GET | `/api/deliveries/{delivery_id}/courier` | Get courier details for delivery |
 
 ---
 
-## Summary
+## Next Steps
 
-✅ **Courier Signup**: Use `/api/courier/signup`
-✅ **All Login**: Use `/api/auth/login` (works for all user types)
-✅ **Password Reset**: Use `/api/auth/password-reset/*` (works for all user types)
-✅ **Token Refresh**: Use `/api/auth/refresh` (works for all user types)
-✅ **User Type**: Check `user.user_type` field to determine user role
-✅ **Courier Profile**: Available as `user.courier_profile` when `user_type === 'COURIER'`
+1. **Install required packages:**
+   ```bash
+   npm install @react-navigation/native @react-navigation/stack @react-navigation/bottom-tabs
+   npm install @react-native-async-storage/async-storage
+   npm install react-native-gesture-handler react-native-reanimated react-native-screens
+   ```
+
+2. **Update API_URL** in deliveryService.ts with your backend URL (e.g., http://192.168.1.100:8080)
+
+3. **Implement the screens** according to this guide
+
+4. **Test each feature** thoroughly
+
+5. **Consider adding:**
+   - Push notifications for status updates
+   - Real-time location tracking
+   - Photo upload for proof of delivery
+   - In-app messaging between courier and customer
 
 ---
 
-## License
-Private - ZipoHub Internal Use Only
+## Troubleshooting
+
+### Issue: 403 Error "Only couriers can view available deliveries"
+
+**Solution:** The backend now includes user_type from database in the token. Make sure:
+1. You're logged in as a courier (check `user_type` in AsyncStorage)
+2. The courier profile exists in the database with `user_type` = "COURIER"
+3. Token is valid and not expired
+
+### Issue: Empty deliveries list
+
+**Solution:**
+1. Create test deliveries using the schedule endpoint or Swagger docs
+2. Check network connection (test with `curl` or Postman)
+3. Verify API_URL is correct in deliveryService.ts
+4. Check backend logs for errors
+
+### Issue: Network request failed
+
+**Solution:**
+1. Make sure backend is running
+2. Use correct IP address (not localhost on physical device)
+3. Check firewall settings
+4. For Android emulator, use `10.0.2.2` instead of `localhost`
+
+---
+
+Good luck with your implementation! 🚀
