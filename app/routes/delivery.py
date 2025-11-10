@@ -9,6 +9,7 @@ from app.models.delivery import (
     AcceptDeliveryRequest,
     UpdateDeliveryStatusRequest,
     DeliveryListResponse,
+    AvailableDeliveryListResponse,
     DeliveryStatus,
     DeliveryPriority,
     UserType,
@@ -219,7 +220,7 @@ async def schedule_delivery(
 # ========== COURIER: VIEW AVAILABLE DELIVERIES ==========
 
 
-@router.get("/available", response_model=DeliveryListResponse)
+@router.get("/available", response_model=AvailableDeliveryListResponse)
 async def get_available_deliveries(
     current_user=Depends(get_current_user),
     page: int = Query(1, ge=1),
@@ -294,7 +295,7 @@ async def get_available_deliveries(
 
         logger.info(f"✅ Retrieved {len(deliveries)} available deliveries for courier {user_id}")
 
-        return DeliveryListResponse(
+        return AvailableDeliveryListResponse(
             deliveries=deliveries,
             total_count=total_count,
             page=page,

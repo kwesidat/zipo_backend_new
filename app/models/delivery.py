@@ -149,3 +149,14 @@ class DeliveryListResponse(BaseModel):
     total_pages: int
     has_next: bool
     has_previous: bool
+
+
+class AvailableDeliveryListResponse(BaseModel):
+    """Paginated list of available deliveries for couriers"""
+    deliveries: List[AvailableDeliveryResponse]
+    total_count: int
+    page: int
+    page_size: int
+    total_pages: int
+    has_next: bool
+    has_previous: bool
