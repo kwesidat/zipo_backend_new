@@ -295,7 +295,7 @@ async def get_available_deliveries(
         logger.info(f"✅ Retrieved {len(deliveries)} available deliveries for courier {user_id}")
 
         return DeliveryListResponse(
-            deliveries=[],  # We'll use available deliveries format instead
+            deliveries=deliveries,
             total_count=total_count,
             page=page,
             page_size=page_size,
