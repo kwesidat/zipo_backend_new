@@ -813,27 +813,46 @@ async def create_paystack_subaccount(
             detail="Invalid contact phone number format"
         )
 
-    # Check for active Ghanaian subscription
-    active_subscription = supabase.table("UserSubscriptions").select(
-        "*, plan:subscriptionPlanId(*)"
-    ).eq("userId", user_id).gt("expiresAt", datetime.utcnow().isoformat()).execute()
+    # Check user type to determine if subscription is required
+    user_check = supabase.table("users").select("user_type, role").eq("user_id", user_id).execute()
 
-    if not active_subscription.data:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User has no active subscription"
-        )
+    is_courier = False
+    platform_cut = 0
 
-    subscription = active_subscription.data[0]
-    plan = subscription.get("plan")
+    if user_check.data and len(user_check.data) > 0:
+        user_type = user_check.data[0].get("user_type")
+        role = user_check.data[0].get("role")
+        is_courier = user_type == "COURIER" or role == "COURIER"
+        logger.info(f"User type: {user_type}, Role: {role}, Is courier: {is_courier}")
 
-    if not plan or plan.get("region") != "GHANA":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User has no active Ghanaian subscription"
-        )
+    # Couriers don't need subscriptions to create subaccounts
+    if not is_courier:
+        # Check for active Ghanaian subscription
+        active_subscription = supabase.table("UserSubscriptions").select(
+            "*, plan:subscriptionPlanId(*)"
+        ).eq("userId", user_id).gt("expiresAt", datetime.utcnow().isoformat()).execute()
 
-    logger.info(f"✅ Active subscription verified: {plan['name']}")
+        if not active_subscription.data:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User has no active subscription"
+            )
+
+        subscription = active_subscription.data[0]
+        plan = subscription.get("plan")
+
+        if not plan or plan.get("region") != "GHANA":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User has no active Ghanaian subscription"
+            )
+
+        logger.info(f"✅ Active subscription verified: {plan['name']}")
+        platform_cut = plan.get("platformCut", 0)
+    else:
+        logger.info(f"✅ Courier user - no subscription required")
+        # For couriers, platform cut is 0 (they keep all earnings)
+        platform_cut = 0
 
     # Check if user already has a subaccount
     existing_subaccount = supabase.table("PaystackSubaccount").select("*").eq(
@@ -847,7 +866,6 @@ async def create_paystack_subaccount(
             detail="User already has a subaccount"
         )
 
-    platform_cut = plan.get("platformCut", 0)
     logger.info(f"Platform cut: {platform_cut}%")
 
     # Define mobile money provider codes based on Paystack's actual response
