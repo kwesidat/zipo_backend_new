@@ -395,7 +395,7 @@ async def verify_payment_and_schedule_delivery(
 
         logger.info(f"💾 Creating order for delivery with fee {delivery_fee}")
 
-        # Create order with PAID status
+        # Create order with COMPLETED payment status
         order_data = {
             "id": order_id,
             "userId": user_id,
@@ -405,7 +405,7 @@ async def verify_payment_and_schedule_delivery(
             "deliveryFee": float(delivery_fee),
             "total": float(delivery_fee),
             "status": "PENDING",
-            "paymentStatus": "PAID",  # ✅ Mark as PAID
+            "paymentStatus": "COMPLETED",  # ✅ Mark as COMPLETED
             "paymentMethod": "PAYSTACK",
             "paymentGateway": "PAYSTACK",
             "currency": "GHS",
