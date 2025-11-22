@@ -443,7 +443,7 @@ async def verify_payment_and_schedule_delivery(
             "distance_km": None,
             "status": "PENDING",
             "priority": delivery_data["priority"],
-            "scheduled_date": delivery_data.get("scheduled_date"),
+            "scheduled_date": delivery_data.get("scheduled_date") or None,
             "notes": delivery_data.get("notes"),
             "item_description": delivery_data.get("item_description"),
             "created_at": now.isoformat(),
