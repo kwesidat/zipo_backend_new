@@ -160,3 +160,19 @@ class AvailableDeliveryListResponse(BaseModel):
     total_pages: int
     has_next: bool
     has_previous: bool
+
+
+class AddressRequest(BaseModel):
+    """Address request model for payment initialization"""
+    address: str
+    city: str
+    country: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    additional_info: Optional[str] = ""
+
+
+class CalculateDeliveryFeeRequest(BaseModel):
+    """Request model for fee calculation"""
+    priority: DeliveryPriority = DeliveryPriority.STANDARD
+    distance_km: Optional[float] = None

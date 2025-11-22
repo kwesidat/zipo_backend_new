@@ -18,7 +18,9 @@
       "Bash(git add:*)",
       "Bash(git log:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Read(//var/log/**)",
+      "Bash(npx prisma generate:*)"
     ],
     "deny": [],
     "ask": []

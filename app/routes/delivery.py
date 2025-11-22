@@ -13,6 +13,7 @@ from app.models.delivery import (
     DeliveryStatus,
     DeliveryPriority,
     UserType,
+    CalculateDeliveryFeeRequest,
 )
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
@@ -20,6 +21,8 @@ from decimal import Decimal
 import logging
 import uuid
 import math
+import os
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +217,269 @@ async def schedule_delivery(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to schedule delivery",
+        )
+
+
+# ========== PAYMENT: INITIALIZE DELIVERY PAYMENT ==========
+
+
+@router.post("/delivery/initialize-payment")
+async def initialize_delivery_payment(
+    request: ScheduleDeliveryRequest,
+    current_user=Depends(get_current_user)
+):
+    """Initialize Paystack payment for delivery"""
+    try:
+        user_id = current_user["user_id"]
+        user_email = current_user.get("email")
+
+        logger.info(f"🔄 Initializing delivery payment for user {user_id}")
+
+        # Calculate delivery fee
+        distance_km = None  # You can calculate this using addresses if needed
+        delivery_fee = calculate_delivery_fee(distance_km, request.priority.value)
+        courier_fee, platform_fee = calculate_courier_and_platform_fees(delivery_fee)
+
+        logger.info(f"💰 Calculated fee: {delivery_fee} GHS (Courier: {courier_fee}, Platform: {platform_fee})")
+
+        # Convert to kobo/pesewas (multiply by 100 for Paystack)
+        amount_in_kobo = int(float(delivery_fee) * 100)
+
+        # Store delivery data temporarily (needed after payment verification)
+        temp_delivery_id = str(uuid.uuid4())
+
+        metadata = {
+            "userId": user_id,
+            "transactionType": "delivery",
+            "tempDeliveryId": temp_delivery_id,
+            "deliveryData": {
+                "pickup_address": request.pickup_address.dict(),
+                "delivery_address": request.delivery_address.dict(),
+                "pickup_contact_name": request.pickup_contact_name,
+                "pickup_contact_phone": request.pickup_contact_phone,
+                "delivery_contact_name": request.delivery_contact_name,
+                "delivery_contact_phone": request.delivery_contact_phone,
+                "priority": request.priority.value,
+                "scheduled_date": request.scheduled_date.isoformat() if request.scheduled_date else None,
+                "notes": request.notes,
+                "item_description": request.item_description,
+            },
+            "deliveryFee": float(delivery_fee),
+            "courierFee": float(courier_fee),
+            "platformFee": float(platform_fee),
+        }
+
+        # Initialize Paystack payment
+        callback_url = f"{os.getenv('NEXT_PUBLIC_BASE_URL')}/api/payment-callback"
+
+        paystack_data = {
+            "email": user_email,
+            "amount": amount_in_kobo,
+            "callback_url": callback_url,
+            "channels": ["card", "bank", "ussd", "qr", "mobile_money", "bank_transfer"],
+            "metadata": metadata
+        }
+
+        logger.info(f"📤 Calling Paystack API with amount {amount_in_kobo} kobo")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{os.getenv('PAYSTACK_BASE_URL')}/transaction/initialize",
+                json=paystack_data,
+                headers={
+                    "Authorization": f"Bearer {os.getenv('PAYSTACK_SECRET_KEY')}",
+                    "Content-Type": "application/json"
+                },
+                timeout=30.0
+            )
+
+        if response.status_code != 200:
+            logger.error(f"❌ Paystack initialization failed: {response.text}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to initialize payment with Paystack"
+            )
+
+        paystack_response = response.json()
+
+        if not paystack_response.get("status"):
+            logger.error(f"❌ Paystack returned error: {paystack_response}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Payment initialization failed"
+            )
+
+        data = paystack_response["data"]
+
+        logger.info(f"✅ Payment initialized successfully. Reference: {data['reference']}")
+
+        return {
+            "authorization_url": data["authorization_url"],
+            "access_code": data["access_code"],
+            "reference": data["reference"],
+            "delivery_fee": float(delivery_fee)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error initializing delivery payment: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initialize payment: {str(e)}"
+        )
+
+
+# ========== PAYMENT: VERIFY AND SCHEDULE DELIVERY ==========
+
+
+@router.post("/delivery/verify-and-schedule")
+async def verify_payment_and_schedule_delivery(
+    reference: str = Query(...),
+    current_user=Depends(get_current_user)
+):
+    """Verify payment and create delivery after successful payment"""
+    try:
+        user_id = current_user["user_id"]
+
+        logger.info(f"🔍 Verifying payment for reference: {reference}")
+
+        # Verify payment with Paystack
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{os.getenv('PAYSTACK_BASE_URL')}/transaction/verify/{reference}",
+                headers={
+                    "Authorization": f"Bearer {os.getenv('PAYSTACK_SECRET_KEY')}"
+                },
+                timeout=30.0
+            )
+
+        if response.status_code != 200:
+            logger.error(f"❌ Paystack verification failed: {response.text}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Payment verification failed"
+            )
+
+        paystack_response = response.json()
+
+        if not paystack_response.get("status"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Payment verification failed"
+            )
+
+        data = paystack_response["data"]
+
+        if data["status"] != "success":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Payment was not successful"
+            )
+
+        # Get delivery data from metadata
+        metadata = data.get("metadata", {})
+        delivery_data = metadata.get("deliveryData", {})
+
+        if metadata.get("userId") != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Unauthorized: User mismatch"
+            )
+
+        # Create the delivery
+        order_id = str(uuid.uuid4())
+        delivery_fee = Decimal(str(metadata["deliveryFee"]))
+        courier_fee = Decimal(str(metadata["courierFee"]))
+        platform_fee = Decimal(str(metadata["platformFee"]))
+
+        logger.info(f"💾 Creating order for delivery with fee {delivery_fee}")
+
+        # Create order with PAID status
+        order_data = {
+            "id": order_id,
+            "userId": user_id,
+            "subtotal": 0,
+            "discountAmount": 0,
+            "tax": 0,
+            "deliveryFee": float(delivery_fee),
+            "total": float(delivery_fee),
+            "status": "PENDING",
+            "paymentStatus": "PAID",  # ✅ Mark as PAID
+            "paymentMethod": "PAYSTACK",
+            "paymentGateway": "PAYSTACK",
+            "currency": "GHS",
+            "shippingAddress": delivery_data["delivery_address"],
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+        }
+
+        order_response = supabase.table("Order").insert(order_data).execute()
+
+        if not order_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create order"
+            )
+
+        # Create delivery record
+        delivery_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc)
+
+        delivery_record = {
+            "id": delivery_id,
+            "order_id": order_id,
+            "pickup_address": delivery_data["pickup_address"],
+            "delivery_address": delivery_data["delivery_address"],
+            "pickup_contact_name": delivery_data["pickup_contact_name"],
+            "pickup_contact_phone": delivery_data["pickup_contact_phone"],
+            "delivery_contact_name": delivery_data["delivery_contact_name"],
+            "delivery_contact_phone": delivery_data["delivery_contact_phone"],
+            "scheduled_by_user": user_id,
+            "scheduled_by_type": current_user.get("user_type", "CUSTOMER"),
+            "delivery_fee": float(delivery_fee),
+            "courier_fee": float(courier_fee),
+            "platform_fee": float(platform_fee),
+            "distance_km": None,
+            "status": "PENDING",
+            "priority": delivery_data["priority"],
+            "scheduled_date": delivery_data.get("scheduled_date"),
+            "notes": delivery_data.get("notes"),
+            "item_description": delivery_data.get("item_description"),
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        delivery_response = supabase.table("Delivery").insert(delivery_record).execute()
+
+        if not delivery_response.data:
+            # Rollback order if delivery creation fails
+            supabase.table("Order").delete().eq("id", order_id).execute()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create delivery"
+            )
+
+        delivery = delivery_response.data[0]
+
+        logger.info(f"✅ Paid delivery {delivery_id} created successfully for user {user_id}")
+
+        return {
+            "delivery": delivery,
+            "payment": {
+                "reference": reference,
+                "amount": data["amount"] / 100,  # Convert back from kobo
+                "status": data["status"]
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error verifying payment and scheduling: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process delivery: {str(e)}"
         )
 
 
@@ -604,7 +870,7 @@ async def update_delivery_status(
                     "courier_id": courier_id,
                     "delivery_id": delivery_id,
                     "amount": float(courier_fee),
-                    "type": "DELIVERY",
+                    "type": "DELIVERY_FEE",
                     "description": f"Delivery fee for order {delivery['order_id'][:8]}",
                     "status": "PENDING",
                     "created_at": now.isoformat(),
@@ -975,6 +1241,36 @@ async def get_delivery(delivery_id: str, current_user=Depends(get_current_user))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch delivery",
+        )
+
+
+# ========== CALCULATE DELIVERY FEE ==========
+
+
+@router.post("/delivery/calculate-fee")
+async def calculate_delivery_fee_endpoint(
+    request: CalculateDeliveryFeeRequest,
+    current_user=Depends(get_current_user)
+):
+    """Calculate delivery fee before payment"""
+    try:
+        distance_km = request.distance_km
+
+        fee = calculate_delivery_fee(distance_km, request.priority.value)
+        courier_fee, platform_fee = calculate_courier_and_platform_fees(fee)
+
+        return {
+            "delivery_fee": float(fee),
+            "courier_fee": float(courier_fee),
+            "platform_fee": float(platform_fee),
+            "distance_km": distance_km,
+            "priority": request.priority
+        }
+    except Exception as e:
+        logger.error(f"Error calculating delivery fee: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to calculate delivery fee"
         )
 
 

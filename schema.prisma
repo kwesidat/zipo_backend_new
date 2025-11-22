@@ -732,6 +732,7 @@ model Delivery {
   actual_pickup_time     DateTime?
   actual_delivery_time   DateTime?
   notes                  String?
+  item_description       String?
   courier_notes          String?
   cancellation_reason    String?
   proof_of_delivery      String[]            @default([])
