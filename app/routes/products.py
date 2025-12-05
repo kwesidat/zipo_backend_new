@@ -93,7 +93,7 @@ async def get_featured_products(
             supabase.table("products")
             .select("""
             id, name, price, currency, country, condition, photos, featured,
-            quantity, allowPurchaseOnPlatform, created_at, sellerId,
+            quantity, allowPurchaseOnPlatform, free_delivery, created_at, sellerId,
             categoryId, subCategoryId
         """)
             .eq("featured", True)
@@ -167,6 +167,7 @@ async def get_featured_products(
                     allowPurchaseOnPlatform=product.get(
                         "allowPurchaseOnPlatform", False
                     ),
+                    free_delivery=product.get("free_delivery", True),
                     created_at=product.get("created_at"),
                     seller_name=sellers_info.get(product["sellerId"]),
                     category_name=categories_info.get(product["categoryId"]),
@@ -201,7 +202,7 @@ async def get_my_products(
             supabase.table("products")
             .select("""
             id, name, price, currency, country, condition, photos, featured,
-            quantity, allowPurchaseOnPlatform, created_at, sellerId,
+            quantity, allowPurchaseOnPlatform, free_delivery, created_at, sellerId,
             categoryId, subCategoryId
         """)
             .eq("sellerId", current_user["user_id"])
@@ -287,6 +288,7 @@ async def get_my_products(
                     allowPurchaseOnPlatform=product.get(
                         "allowPurchaseOnPlatform", False
                     ),
+                    free_delivery=product.get("free_delivery", True),
                     created_at=product.get("created_at"),
                     seller_name=None,  # Current user
                     category_name=categories_info.get(product["categoryId"]),
@@ -433,7 +435,7 @@ async def search_products(
         # Build the query
         query = supabase.table("products").select("""
             id, name, description, price, currency, country, condition, photos, featured,
-            quantity, allowPurchaseOnPlatform, created_at, sellerId,
+            quantity, allowPurchaseOnPlatform, free_delivery, created_at, sellerId,
             categoryId, subCategoryId, fields
         """)
 
@@ -601,6 +603,7 @@ async def search_products(
                     allowPurchaseOnPlatform=product.get(
                         "allowPurchaseOnPlatform", False
                     ),
+                    free_delivery=product.get("free_delivery", True),
                     created_at=product.get("created_at"),
                     seller_name=sellers_info.get(product.get("sellerId")),
                     category_name=categories_info.get(product.get("categoryId")),
@@ -661,7 +664,7 @@ async def get_products(
         # Build the query
         query = supabase.table("products").select("""
             id, name, price, currency, country, condition, photos, featured,
-            quantity, allowPurchaseOnPlatform, created_at, sellerId,
+            quantity, allowPurchaseOnPlatform, free_delivery, created_at, sellerId,
             categoryId, subCategoryId
         """)
 
@@ -826,6 +829,7 @@ async def get_products(
                     allowPurchaseOnPlatform=product.get(
                         "allowPurchaseOnPlatform", False
                     ),
+                    free_delivery=product.get("free_delivery", True),
                     created_at=product.get("created_at"),
                     seller_name=sellers_info.get(product["sellerId"]),
                     category_name=categories_info.get(product["categoryId"]),
@@ -945,6 +949,7 @@ async def get_product_by_id(
             quantity=product.get("quantity", 0),
             allowPurchaseOnPlatform=product.get("allowPurchaseOnPlatform", False),
             featured=product.get("featured", False),
+            free_delivery=product.get("free_delivery", True),
             created_at=product.get("created_at"),
             updated_at=product.get("updated_at"),
             seller=seller_info,
@@ -1039,7 +1044,7 @@ async def create_product(
             subCategoryId=created_product["subCategoryId"],
             sellerId=created_product["sellerId"],
             description=created_product.get("description"),
-            condition=created_product.get("description"),
+            condition=created_product.get("condition"),
             photos=created_product.get("photos", []),
             fields=created_product.get("fields")
             if created_product.get("fields") and created_product.get("fields") != "[]"
@@ -1050,6 +1055,7 @@ async def create_product(
                 "allowPurchaseOnPlatform", False
             ),
             featured=created_product.get("featured", False),
+            free_delivery=created_product.get("free_delivery", True),
             created_at=created_product.get("created_at"),
             updated_at=created_product.get("updated_at"),
         )
@@ -1081,6 +1087,7 @@ async def create_product_with_images(
     quantity: int = Form(0, ge=0),
     allowPurchaseOnPlatform: bool = Form(False),
     featured: bool = Form(False),
+    free_delivery: bool = Form(True),
     fields: Optional[str] = Form(None),
     images: List[UploadFile] = File([]),
     current_user=Depends(get_required_user),
@@ -1241,6 +1248,7 @@ async def create_product_with_images(
             "quantity": quantity,
             "allowPurchaseOnPlatform": allowPurchaseOnPlatform,
             "featured": featured,
+            "free_delivery": free_delivery,
             "created_at": datetime.utcnow().isoformat(),
             "updated_at": datetime.utcnow().isoformat(),
         }
@@ -1282,6 +1290,7 @@ async def create_product_with_images(
                 "allowPurchaseOnPlatform", False
             ),
             featured=created_product.get("featured", False),
+            free_delivery=created_product.get("free_delivery", True),
             created_at=created_product.get("created_at"),
             updated_at=created_product.get("updated_at"),
         )
@@ -1404,6 +1413,7 @@ async def update_product(
                 "allowPurchaseOnPlatform", False
             ),
             featured=updated_product.get("featured", False),
+            free_delivery=updated_product.get("free_delivery", True),
             created_at=updated_product.get("created_at"),
             updated_at=updated_product.get("updated_at"),
         )
@@ -1534,6 +1544,7 @@ async def toggle_product_featured(
                 "allowPurchaseOnPlatform", False
             ),
             featured=updated_product.get("featured", False),
+            free_delivery=updated_product.get("free_delivery", True),
             created_at=updated_product.get("created_at"),
             updated_at=updated_product.get("updated_at"),
         )
@@ -1622,6 +1633,7 @@ async def toggle_online_payment(
                 "allowPurchaseOnPlatform", False
             ),
             featured=updated_product.get("featured", False),
+            free_delivery=updated_product.get("free_delivery", True),
             created_at=updated_product.get("created_at"),
             updated_at=updated_product.get("updated_at"),
         )

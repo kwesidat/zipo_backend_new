@@ -7,7 +7,7 @@ datasource db {
   provider          = "postgresql"
   url               = env("DATABASE_URL")
   directUrl         = env("DIRECT_URL")
-  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+  // shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
 model categories {
@@ -36,6 +36,7 @@ model products {
   currency                SupportedCurrencies @default(GHS)
   quantity                Int                 @default(0)
   allowPurchaseOnPlatform Boolean             @default(false)
+  free_delivery           Boolean             @default(true)
   created_at              DateTime?           @default(now()) @db.Timestamptz(6)
   updated_at              DateTime?           @default(now()) @db.Timestamptz(6)
   featured                Boolean             @default(false)
@@ -69,6 +70,8 @@ model users {
   country              String?
   city                 String?
   address              String?
+  latitude             Float?
+  longitude            Float?
   business_name        String?
   business_logo        String?
   business_description String?
@@ -98,13 +101,13 @@ model users {
 }
 
 model ProductDraft {
-  id         String   @id @default(uuid()) @db.Uuid
-  sellerId   String   @db.Uuid
-  data       Json?
-  photos     String[] @default([])
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  user       users    @relation(fields: [sellerId], references: [user_id], onDelete: Cascade)
+  id        String   @id @default(uuid()) @db.Uuid
+  sellerId  String   @db.Uuid
+  data      Json?
+  photos    String[] @default([])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      users    @relation(fields: [sellerId], references: [user_id], onDelete: Cascade)
 }
 
 model SubscriptionPlans {
@@ -328,47 +331,53 @@ model CartItem {
 }
 
 model Order {
-  id               String              @id @default(uuid()) @db.Uuid
-  userId           String              @db.Uuid
-  subtotal         Decimal             @db.Decimal(10, 2)
-  discountAmount   Decimal             @default(0) @db.Decimal(10, 2)
-  tax              Decimal             @default(0) @db.Decimal(10, 2)
-  deliveryFee      Decimal             @default(0) @db.Decimal(10, 2)
-  total            Decimal             @db.Decimal(10, 2)
-  status           OrderStatus         @default(PENDING)
-  currency         SupportedCurrencies @default(GHS)
-  shippingAddress  Json?
-  trackingNumber   String?
-  paymentMethod    String?
-  paymentGateway   PaymentGateway?
-  paymentStatus    PaymentStatus       @default(PENDING)
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
-  user             users               @relation(fields: [userId], references: [user_id], onDelete: Cascade)
-  appliedDiscounts OrderDiscount[]
-  deliveries       Delivery[]
-  items            OrderItem[]
+  id                   String                @id @default(uuid()) @db.Uuid
+  userId               String                @db.Uuid
+  subtotal             Decimal               @db.Decimal(10, 2)
+  discountAmount       Decimal               @default(0) @db.Decimal(10, 2)
+  tax                  Decimal               @default(0) @db.Decimal(10, 2)
+  deliveryFee          Decimal               @default(0) @db.Decimal(10, 2)
+  deliveryBreakdown    Json?
+  total                Decimal               @db.Decimal(10, 2)
+  status               OrderStatus           @default(PENDING)
+  currency             SupportedCurrencies   @default(GHS)
+  shippingAddress      Json?
+  trackingNumber       String?
+  paymentMethod        String?
+  paymentGateway       PaymentGateway?
+  paymentStatus        PaymentStatus         @default(PENDING)
+  orderNotes           String?
+  useCourierService    Boolean               @default(false)
+  courierServiceStatus CourierServiceStatus? @default(PENDING)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  user                 users                 @relation(fields: [userId], references: [user_id], onDelete: Cascade)
+  appliedDiscounts     OrderDiscount[]
+  deliveries           Delivery[]
+  items                OrderItem[]
 
   @@index([userId])
   @@index([status])
   @@index([createdAt])
+  @@index([useCourierService, courierServiceStatus])
 }
 
 model OrderItem {
-  id         String   @id @default(uuid()) @db.Uuid
-  orderId    String   @db.Uuid
-  productId  String   @db.Uuid
-  quantity   Int
-  price      Decimal  @db.Decimal(10, 2)
-  title      String
-  image      String?
-  condition  String?
-  location   String?
-  sellerId   String   @db.Uuid
-  sellerName String
-  createdAt  DateTime @default(now())
-  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product    products @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id           String   @id @default(uuid()) @db.Uuid
+  orderId      String   @db.Uuid
+  productId    String   @db.Uuid
+  quantity     Int
+  price        Decimal  @db.Decimal(10, 2)
+  title        String
+  image        String?
+  condition    String?
+  location     String?
+  sellerId     String   @db.Uuid
+  sellerName   String
+  freeDelivery Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product      products @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
   @@index([productId])
@@ -678,30 +687,30 @@ enum commissiontransactiontype {
 }
 
 model Courier {
-  id                String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  user_id           String              @unique @db.Uuid
-  courier_code      String              @unique
-  vehicle_type      VehicleType?
-  vehicle_number    String?
-  license_number    String?
-  service_areas     String[]            @default([])
-  current_location  Json?
-  rating            Float               @default(0)
-  total_deliveries  Int                 @default(0)
-  completed_deliveries Int              @default(0)
-  total_earnings    Decimal             @default(0) @db.Decimal(10, 2)
-  available_balance Decimal             @default(0) @db.Decimal(10, 2)
-  bank_name         String?
-  account_number    String?
-  account_name      String?
-  is_available      Boolean             @default(true)
-  is_verified       Boolean             @default(false)
-  created_at        DateTime            @default(now()) @db.Timestamp(6)
-  updated_at        DateTime            @updatedAt @db.Timestamp(6)
-  user              users               @relation("CourierProfile", fields: [user_id], references: [user_id], onDelete: Cascade)
-  deliveries        Delivery[]
-  courier_earnings  CourierEarning[]
-  location_history  CourierLocation[]
+  id                   String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id              String            @unique @db.Uuid
+  courier_code         String            @unique
+  vehicle_type         VehicleType?
+  vehicle_number       String?
+  license_number       String?
+  service_areas        String[]          @default([])
+  current_location     Json?
+  rating               Float             @default(0)
+  total_deliveries     Int               @default(0)
+  completed_deliveries Int               @default(0)
+  total_earnings       Decimal           @default(0) @db.Decimal(10, 2)
+  available_balance    Decimal           @default(0) @db.Decimal(10, 2)
+  bank_name            String?
+  account_number       String?
+  account_name         String?
+  is_available         Boolean           @default(true)
+  is_verified          Boolean           @default(false)
+  created_at           DateTime          @default(now()) @db.Timestamp(6)
+  updated_at           DateTime          @updatedAt @db.Timestamp(6)
+  user                 users             @relation("CourierProfile", fields: [user_id], references: [user_id], onDelete: Cascade)
+  deliveries           Delivery[]
+  courier_earnings     CourierEarning[]
+  location_history     CourierLocation[]
 
   @@index([courier_code])
   @@index([user_id])
@@ -709,42 +718,42 @@ model Courier {
 }
 
 model Delivery {
-  id                     String              @id @default(uuid()) @db.Uuid
-  order_id               String              @db.Uuid
-  courier_id             String?             @db.Uuid
-  pickup_address         Json
-  delivery_address       Json
-  pickup_contact_name    String?
-  pickup_contact_phone   String?
-  delivery_contact_name  String?
-  delivery_contact_phone String?
-  scheduled_by_user      String              @db.Uuid
-  scheduled_by_type      usertype
-  delivery_fee           Decimal             @db.Decimal(10, 2)
-  courier_fee            Decimal?            @db.Decimal(10, 2)
-  platform_fee           Decimal?            @db.Decimal(10, 2)
-  distance_km            Float?
-  status                 DeliveryStatus      @default(PENDING)
-  priority               DeliveryPriority    @default(STANDARD)
-  scheduled_date         DateTime?
-  estimated_pickup_time  DateTime?
+  id                      String                  @id @default(uuid()) @db.Uuid
+  order_id                String                  @db.Uuid
+  courier_id              String?                 @db.Uuid
+  pickup_address          Json
+  delivery_address        Json
+  pickup_contact_name     String?
+  pickup_contact_phone    String?
+  delivery_contact_name   String?
+  delivery_contact_phone  String?
+  scheduled_by_user       String                  @db.Uuid
+  scheduled_by_type       usertype
+  delivery_fee            Decimal                 @db.Decimal(10, 2)
+  courier_fee             Decimal?                @db.Decimal(10, 2)
+  platform_fee            Decimal?                @db.Decimal(10, 2)
+  distance_km             Float?
+  status                  DeliveryStatus          @default(PENDING)
+  priority                DeliveryPriority        @default(STANDARD)
+  scheduled_date          DateTime?
+  estimated_pickup_time   DateTime?
   estimated_delivery_time DateTime?
-  actual_pickup_time     DateTime?
-  actual_delivery_time   DateTime?
-  notes                  String?
-  item_description       String?
-  courier_notes          String?
-  cancellation_reason    String?
-  proof_of_delivery      String[]            @default([])
-  customer_signature     String?
-  rating                 Float?
-  review                 String?
-  created_at             DateTime            @default(now())
-  updated_at             DateTime            @updatedAt
-  courier                Courier?            @relation(fields: [courier_id], references: [id])
-  order                  Order               @relation(fields: [order_id], references: [id], onDelete: Cascade)
-  scheduled_by           users               @relation("DeliveryScheduledBy", fields: [scheduled_by_user], references: [user_id])
-  status_history         DeliveryStatusHistory[]
+  actual_pickup_time      DateTime?
+  actual_delivery_time    DateTime?
+  notes                   String?
+  courier_notes           String?
+  cancellation_reason     String?
+  proof_of_delivery       String[]                @default([])
+  customer_signature      String?
+  rating                  Float?
+  review                  String?
+  item_description        String?
+  created_at              DateTime                @default(now())
+  updated_at              DateTime                @updatedAt
+  courier                 Courier?                @relation(fields: [courier_id], references: [id])
+  order                   Order                   @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  scheduled_by            users                   @relation("DeliveryScheduledBy", fields: [scheduled_by_user], references: [user_id])
+  status_history          DeliveryStatusHistory[]
 
   @@index([order_id])
   @@index([courier_id])
@@ -754,16 +763,16 @@ model Delivery {
 }
 
 model CourierEarning {
-  id             String              @id @default(uuid()) @db.Uuid
-  courier_id     String              @db.Uuid
-  delivery_id    String?             @db.Uuid
-  amount         Decimal             @db.Decimal(10, 2)
-  type           CourierEarningType
-  description    String?
-  status         EarningStatus       @default(PENDING)
-  created_at     DateTime            @default(now())
-  processed_at   DateTime?
-  courier        Courier             @relation(fields: [courier_id], references: [id], onDelete: Cascade)
+  id           String             @id @default(uuid()) @db.Uuid
+  courier_id   String             @db.Uuid
+  delivery_id  String?            @db.Uuid
+  amount       Decimal            @db.Decimal(10, 2)
+  type         CourierEarningType
+  description  String?
+  status       EarningStatus      @default(PENDING)
+  created_at   DateTime           @default(now())
+  processed_at DateTime?
+  courier      Courier            @relation(fields: [courier_id], references: [id], onDelete: Cascade)
 
   @@index([courier_id])
   @@index([status])
@@ -834,6 +843,13 @@ enum EarningStatus {
   COMPLETED
   FAILED
   REVERSED
+}
+
+enum CourierServiceStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  ASSIGNED
 }
 
 enum usertype {

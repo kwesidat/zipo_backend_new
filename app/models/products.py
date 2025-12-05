@@ -38,6 +38,7 @@ class ProductBase(BaseModel):
     quantity: int = Field(default=0, ge=0, description="Available stock quantity")
     allowPurchaseOnPlatform: bool = Field(default=False, description="Enable online payment for this product")
     featured: bool = Field(default=False, description="Mark product as featured")
+    free_delivery: bool = Field(default=True, description="Offer free delivery for this product")
 
 class ProductCreate(ProductBase):
     pass
@@ -56,6 +57,7 @@ class ProductUpdate(BaseModel):
     quantity: Optional[int] = Field(None, ge=0)
     allowPurchaseOnPlatform: Optional[bool] = None
     featured: Optional[bool] = None
+    free_delivery: Optional[bool] = None
 
 class SellerInfo(BaseModel):
     user_id: str
@@ -94,6 +96,7 @@ class ProductListItem(BaseModel):
     featured: bool = False
     quantity: int = 0
     allowPurchaseOnPlatform: bool = False
+    free_delivery: bool = True
     created_at: Optional[datetime] = None
     seller_name: Optional[str] = None
     category_name: Optional[str] = None
