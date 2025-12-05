@@ -561,6 +561,8 @@ async def buy_now(request: BuyNowRequest, current_user=Depends(get_current_user)
             "currency": product["currency"],
             "shippingAddress": {**request.shippingAddress.dict(), "deliveryMetadata": delivery_metadata},
             "paymentGateway": request.paymentGateway.value,
+            "useCourierService": request.enableCourierDelivery,
+            "courierServiceStatus": "PENDING" if request.enableCourierDelivery else None,
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "updatedAt": datetime.now(timezone.utc).isoformat(),
         }
@@ -865,6 +867,8 @@ async def checkout_cart(
             "currency": cart_currency,
             "shippingAddress": {**request.shippingAddress.dict(), "deliveryMetadata": delivery_metadata},
             "paymentGateway": request.paymentGateway.value,
+            "useCourierService": request.enableCourierDelivery,
+            "courierServiceStatus": "PENDING" if request.enableCourierDelivery else None,
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "updatedAt": datetime.now(timezone.utc).isoformat(),
         }
