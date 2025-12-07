@@ -94,3 +94,14 @@ class AuthStatusResponse(BaseModel):
 class LogoutResponse(BaseModel):
     message: str
     logged_out: bool
+
+class GoogleSignInRequest(BaseModel):
+    id_token: str
+    device_info: Optional[str] = None
+
+class GoogleSignInResponse(BaseModel):
+    user: UserResponse
+    session: dict
+    supabase_tokens: dict
+    is_new_user: bool
+    needs_profile_completion: bool = False

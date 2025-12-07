@@ -74,6 +74,7 @@ app.add_middleware(
         "/api/auth/mobile/signup",
         "/api/auth/mobile/login",
         "/api/auth/mobile/refresh",
+        "/api/auth/google/signin",
         "/api/auth/password-reset/request",
         "/api/auth/password-reset/verify",
         "/api/auth/password-reset/verify-otp",

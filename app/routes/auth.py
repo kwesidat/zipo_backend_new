@@ -4,7 +4,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.models.auth import (
     SignUpRequest, LoginRequest, AuthResponse, UserResponse, TokenResponse,
     PasswordResetRequest, PasswordResetVerify, RefreshTokenRequest,
-    AuthStatusResponse, LogoutResponse, PasswordResetOTPVerify, PasswordResetComplete
+    AuthStatusResponse, LogoutResponse, PasswordResetOTPVerify, PasswordResetComplete,
+    GoogleSignInRequest, GoogleSignInResponse
 )
 from app.database import supabase
 from app.utils.auth_utils import AuthUtils
@@ -251,15 +252,24 @@ async def login(credentials: LoginRequest):
     except HTTPException:
         raise
     except Exception as e:
-        if "Invalid login credentials" in str(e):
+        # Check for Supabase authentication errors
+        error_msg = str(e).lower()
+        if "invalid login credentials" in error_msg or "invalid email or password" in error_msg:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"
             )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
-        )
+        elif "email not confirmed" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Please verify your email address before logging in"
+            )
+        else:
+            print(f"Login error: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Login failed. Please try again."
+            )
 
 # Mobile-specific endpoints
 
@@ -351,10 +361,24 @@ async def mobile_login(credentials: LoginRequest, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
-        )
+        # Check for Supabase authentication errors
+        error_msg = str(e).lower()
+        if "invalid login credentials" in error_msg or "invalid email or password" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password"
+            )
+        elif "email not confirmed" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Please verify your email address before logging in"
+            )
+        else:
+            print(f"Mobile login error: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Login failed. Please try again."
+            )
 
 @router.post("/mobile/signup", response_model=dict)
 async def mobile_signup(user_data: SignUpRequest, request: Request):
@@ -1088,6 +1112,120 @@ async def mobile_logout(request: Request, credentials: Optional[HTTPAuthorizatio
                 "timestamp": datetime.utcnow().isoformat()
             }
         }
+
+
+@router.post("/google/signin", response_model=GoogleSignInResponse)
+async def google_sign_in(google_data: GoogleSignInRequest, request: Request):
+    """
+    Google Sign-In endpoint for mobile apps.
+
+    Flow:
+    1. Verify Google ID token with Supabase
+    2. Check if user exists in database
+    3. If new user, return flag to navigate to role selection
+    4. If existing user, return full profile
+    """
+    try:
+        user_agent = request.headers.get('user-agent', google_data.device_info or '')
+
+        # Sign in with Google using Supabase
+        auth_response = supabase.auth.sign_in_with_id_token({
+            "provider": "google",
+            "token": google_data.id_token
+        })
+
+        if not auth_response.user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Google token"
+            )
+
+        user = auth_response.user
+        is_new_user = False
+        needs_profile_completion = False
+
+        # Check if user exists in database
+        try:
+            db_response = supabase.table("users").select("*").eq("user_id", user.id).execute()
+
+            if not db_response.data or len(db_response.data) == 0:
+                # New user - create minimal record
+                is_new_user = True
+                needs_profile_completion = True
+
+                user_metadata = user.user_metadata or {}
+
+                # Create minimal user record
+                user_db_data = {
+                    "user_id": user.id,
+                    "name": user_metadata.get("full_name", user_metadata.get("name", "")),
+                    "email": user.email,
+                    "verified": True,  # Google users are pre-verified
+                    "role": "client"  # Default role, will be updated after role selection
+                }
+
+                try:
+                    insert_response = supabase.table("users").insert(user_db_data).execute()
+                    print(f"New Google user created: {user.id}")
+                except Exception as insert_error:
+                    print(f"Error creating Google user record: {insert_error}")
+
+                # Return minimal user response for new users
+                user_response = UserResponse(
+                    user_id=user.id,
+                    name=user_db_data["name"],
+                    email=user.email or "",
+                    verified=True,
+                    role="client"
+                )
+            else:
+                # Existing user - fetch full profile
+                user_db = db_response.data[0]
+                user_response = fetch_user_with_profile(user.id, user_db)
+
+                # Check if profile needs completion (missing required fields)
+                if not user_db.get("phone_number") or not user_db.get("user_type"):
+                    needs_profile_completion = True
+
+        except Exception as db_error:
+            print(f"Database error during Google sign-in: {db_error}")
+            # Fallback to metadata
+            user_metadata = user.user_metadata or {}
+            user_response = UserResponse(
+                user_id=user.id,
+                name=user_metadata.get("full_name", user_metadata.get("name", "")),
+                email=user.email or "",
+                verified=True,
+                role="client"
+            )
+            is_new_user = True
+            needs_profile_completion = True
+
+        # Create mobile session
+        mobile_session = AuthUtils.create_mobile_session(
+            user_id=user.id,
+            device_info=user_agent
+        )
+
+        return GoogleSignInResponse(
+            user=user_response,
+            session=mobile_session,
+            supabase_tokens={
+                "access_token": auth_response.session.access_token if auth_response.session else "",
+                "refresh_token": auth_response.session.refresh_token if auth_response.session else ""
+            },
+            is_new_user=is_new_user,
+            needs_profile_completion=needs_profile_completion
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Google sign-in error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Google sign-in failed: {str(e)}"
+        )
 
 
 # Email Verification Endpoints
