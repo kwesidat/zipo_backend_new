@@ -880,6 +880,14 @@ async def get_product_by_id(
 
         product = product_response.data[0]
 
+        # Parse fields if it's a JSON string
+        if product.get("fields") and isinstance(product.get("fields"), str):
+            try:
+                product["fields"] = json.loads(product["fields"])
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse fields JSON for product {product_id}")
+                product["fields"] = None
+
         # Get seller info
         seller_info = None
         if include_seller_info:
@@ -1032,6 +1040,14 @@ async def create_product(
             )
 
         created_product = response.data[0]
+
+        # Parse fields if it's a JSON string
+        if created_product.get("fields") and isinstance(created_product.get("fields"), str):
+            try:
+                created_product["fields"] = json.loads(created_product["fields"])
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse fields JSON for newly created product")
+                created_product["fields"] = None
 
         return ProductResponse(
             id=created_product["id"],
@@ -1268,6 +1284,14 @@ async def create_product_with_images(
 
         created_product = response.data[0]
 
+        # Parse fields if it's a JSON string
+        if created_product.get("fields") and isinstance(created_product.get("fields"), str):
+            try:
+                created_product["fields"] = json.loads(created_product["fields"])
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse fields JSON for newly created product")
+                created_product["fields"] = None
+
         return ProductResponse(
             id=created_product["id"],
             name=created_product["name"],
@@ -1388,6 +1412,14 @@ async def update_product(
             )
 
         updated_product = response.data[0]
+
+        # Parse fields if it's a JSON string
+        if updated_product.get("fields") and isinstance(updated_product.get("fields"), str):
+            try:
+                updated_product["fields"] = json.loads(updated_product["fields"])
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse fields JSON for product {product_id}")
+                updated_product["fields"] = None
 
         return ProductResponse(
             id=updated_product["id"],
@@ -1518,6 +1550,14 @@ async def toggle_product_featured(
 
         updated_product = response.data[0]
 
+        # Parse fields if it's a JSON string
+        if updated_product.get("fields") and isinstance(updated_product.get("fields"), str):
+            try:
+                updated_product["fields"] = json.loads(updated_product["fields"])
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse fields JSON for product {product_id}")
+                updated_product["fields"] = None
+
         return ProductResponse(
             id=updated_product["id"],
             name=updated_product["name"],
@@ -1604,6 +1644,14 @@ async def toggle_online_payment(
             )
 
         updated_product = response.data[0]
+
+        # Parse fields if it's a JSON string
+        if updated_product.get("fields") and isinstance(updated_product.get("fields"), str):
+            try:
+                updated_product["fields"] = json.loads(updated_product["fields"])
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse fields JSON for product {product_id}")
+                updated_product["fields"] = None
 
         return ProductResponse(
             id=updated_product["id"],
