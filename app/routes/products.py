@@ -942,9 +942,7 @@ async def get_product_by_id(
             description=product.get("description"),
             condition=product.get("condition"),
             photos=product.get("photos", []),
-            fields=product.get("fields")
-            if product.get("fields") and product.get("fields") != "[]"
-            else None,
+            fields=product.get("fields") if product.get("fields") and product.get("fields") != "[]" else None,
             currency=product["currency"],
             quantity=product.get("quantity", 0),
             allowPurchaseOnPlatform=product.get("allowPurchaseOnPlatform", False),
@@ -1046,9 +1044,7 @@ async def create_product(
             description=created_product.get("description"),
             condition=created_product.get("condition"),
             photos=created_product.get("photos", []),
-            fields=created_product.get("fields")
-            if created_product.get("fields") and created_product.get("fields") != "[]"
-            else None,
+            fields=created_product.get("fields") if created_product.get("fields") and created_product.get("fields") != "[]" else None,
             currency=created_product["currency"],
             quantity=created_product.get("quantity", 0),
             allowPurchaseOnPlatform=created_product.get(
@@ -1404,9 +1400,7 @@ async def update_product(
             description=updated_product.get("description"),
             condition=updated_product.get("condition"),
             photos=updated_product.get("photos", []),
-            fields=updated_product.get("fields")
-            if updated_product.get("fields") and updated_product.get("fields") != "[]"
-            else None,
+            fields=updated_product.get("fields") if updated_product.get("fields") and updated_product.get("fields") != "[]" else None,
             currency=updated_product["currency"],
             quantity=updated_product.get("quantity", 0),
             allowPurchaseOnPlatform=updated_product.get(
@@ -1535,9 +1529,7 @@ async def toggle_product_featured(
             description=updated_product.get("description"),
             condition=updated_product.get("condition"),
             photos=updated_product.get("photos", []),
-            fields=updated_product.get("fields")
-            if updated_product.get("fields") and updated_product.get("fields") != "[]"
-            else None,
+            fields=updated_product.get("fields") if updated_product.get("fields") and updated_product.get("fields") != "[]" else None,
             currency=updated_product["currency"],
             quantity=updated_product.get("quantity", 0),
             allowPurchaseOnPlatform=updated_product.get(
@@ -1624,9 +1616,7 @@ async def toggle_online_payment(
             description=updated_product.get("description"),
             condition=updated_product.get("condition"),
             photos=updated_product.get("photos", []),
-            fields=updated_product.get("fields")
-            if updated_product.get("fields") and updated_product.get("fields") != "[]"
-            else None,
+            fields=updated_product.get("fields") if updated_product.get("fields") and updated_product.get("fields") != "[]" else None,
             currency=updated_product["currency"],
             quantity=updated_product.get("quantity", 0),
             allowPurchaseOnPlatform=updated_product.get(
