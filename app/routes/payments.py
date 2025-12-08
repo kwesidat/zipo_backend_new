@@ -250,7 +250,7 @@ async def subscribe_to_plan(
         from datetime import datetime
 
         active_subs = supabase.table("UserSubscriptions").select(
-            "id, expiresAt, plan:subscriptionPlanId(name, region, subscriptionTier)"
+            "id, expiresAt, subscriptionPlanId, plan:subscriptionPlanId(name, region, subscriptionTier)"
         ).eq("userId", user_id).execute()
 
         # Filter for active subscriptions (not expired)
@@ -260,16 +260,16 @@ async def subscribe_to_plan(
             for sub in active_subs.data:
                 expires_at = datetime.fromisoformat(sub["expiresAt"].replace('Z', '+00:00'))
 
-                # Check if subscription is still active
-                if expires_at > now:
+                # Check if subscription is still active AND it's for the SAME plan they're trying to subscribe to
+                if expires_at > now and sub["subscriptionPlanId"] == request.subscriptionPlanId:
                     plan_name = sub.get("plan", {}).get("name", "Unknown Plan")
                     logger.warning(f"User {user_id} already has active subscription: {plan_name}")
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"You already have an active subscription ({plan_name}) that expires on {expires_at.strftime('%B %d, %Y')}. Please wait for it to expire before subscribing to a new plan."
+                        detail=f"You already have an active subscription ({plan_name}) that expires on {expires_at.strftime('%B %d, %Y')}. Please wait for it to expire before renewing."
                     )
 
-        logger.info(f"✅ User {user_id} has no active subscription - can proceed")
+        logger.info(f"✅ User {user_id} can proceed with subscription")
         
         # Get subscription plan
         plan_response = supabase.table("SubscriptionPlans").select("*").eq(
@@ -468,7 +468,7 @@ async def verify_subscription_payment(
 
         logger.info(f"Subscription Plan ID: {subscription_plan_id}")
 
-        # Check if subscription already exists
+        # Check if subscription already exists (including expired ones)
         existing_subscription = supabase.table("UserSubscriptions").select(
             "*, plan:subscriptionPlanId(*)"
         ).eq("userId", user_id).eq("subscriptionPlanId", subscription_plan_id).execute()
@@ -476,8 +476,77 @@ async def verify_subscription_payment(
         subscription = None
 
         if existing_subscription.data and len(existing_subscription.data) > 0:
-            subscription = existing_subscription.data[0]
-            logger.info(f"✅ Existing subscription found: {subscription['id']}")
+            existing_sub = existing_subscription.data[0]
+            existing_expires_at = datetime.fromisoformat(existing_sub["expiresAt"].replace('Z', '+00:00'))
+            now = datetime.utcnow()
+
+            # Check if subscription is expired - if so, renew it
+            if existing_expires_at <= now:
+                logger.info(f"🔄 Renewing expired subscription: {existing_sub['id']}")
+
+                # Get plan details to calculate new expiry
+                plan_response = supabase.table("SubscriptionPlans").select("*").eq(
+                    "id", subscription_plan_id
+                ).execute()
+
+                if plan_response.data:
+                    plan = plan_response.data[0]
+                    interval = plan["interval"]
+
+                    # Calculate new expiry date from now
+                    if interval == "DAILY":
+                        new_expires_at = now + timedelta(days=1)
+                    elif interval == "WEEKLY":
+                        new_expires_at = now + timedelta(weeks=1)
+                    elif interval == "MONTHLY":
+                        new_expires_at = now + timedelta(days=30)
+                    elif interval == "QUARTERLY":
+                        new_expires_at = now + timedelta(days=90)
+                    elif interval == "BIANNUALLY":
+                        new_expires_at = now + timedelta(days=180)
+                    elif interval == "ANNUALLY":
+                        new_expires_at = now + timedelta(days=365)
+                    else:
+                        new_expires_at = now + timedelta(days=30)
+
+                    logger.info(f"📅 New expiry: {new_expires_at.isoformat()}")
+
+                    # Update the subscription
+                    update_response = supabase.table("UserSubscriptions").update({
+                        "expiresAt": new_expires_at.isoformat(),
+                        "updatedAt": now.isoformat()
+                    }).eq("id", existing_sub["id"]).execute()
+
+                    if update_response.data and len(update_response.data) > 0:
+                        # Fetch updated subscription with plan details
+                        subscription_response = supabase.table("UserSubscriptions").select(
+                            "*, plan:subscriptionPlanId(*)"
+                        ).eq("id", existing_sub["id"]).execute()
+
+                        if subscription_response.data:
+                            subscription = subscription_response.data[0]
+                            logger.info(f"✅ Subscription renewed successfully")
+
+                            # Send renewal success notification
+                            try:
+                                notification_data = {
+                                    "userId": user_id,
+                                    "title": "Subscription Renewed",
+                                    "notificationType": "SUCCESS",
+                                    "body": f"Your {plan['name']} subscription has been renewed successfully! Your new expiry date is {new_expires_at.strftime('%B %d, %Y')}.",
+                                    "dismissed": False,
+                                    "createdAt": now.isoformat(),
+                                    "expiresAt": (now + timedelta(days=30)).isoformat()
+                                }
+                                supabase.table("Notification").insert(notification_data).execute()
+                                logger.info(f"✅ Renewal notification sent")
+                            except Exception as notif_error:
+                                logger.error(f"❌ Error creating notification: {str(notif_error)}")
+                    else:
+                        logger.error("❌ Failed to update subscription")
+            else:
+                subscription = existing_sub
+                logger.info(f"✅ Active subscription found: {subscription['id']}")
         else:
             # Create new subscription since webhook didn't create it
             logger.info("🆕 Creating new subscription (webhook didn't create it)...")

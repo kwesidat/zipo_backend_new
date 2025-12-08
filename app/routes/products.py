@@ -911,7 +911,7 @@ async def get_product_by_id(
         if include_seller_info:
             seller_response = (
                 supabase.table("users")
-                .select("user_id, name, email, phone_number, business_name")
+                .select("user_id, name, email, phone_number, business_name, latitude, longitude")
                 .eq("user_id", product["sellerId"])
                 .execute()
             )
@@ -923,6 +923,8 @@ async def get_product_by_id(
                     email=seller_data["email"],
                     phone_number=seller_data.get("phone_number"),
                     business_name=seller_data.get("business_name"),
+                    latitude=seller_data.get("latitude"),
+                    longitude=seller_data.get("longitude"),
                 )
 
         # Get category info

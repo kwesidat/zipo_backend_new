@@ -65,6 +65,8 @@ class SellerInfo(BaseModel):
     email: str
     phone_number: Optional[str] = None
     business_name: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 class CategoryInfo(BaseModel):
     id: str
