@@ -683,25 +683,31 @@ async def handle_subscription_payment(
             .execute()
         )
 
-        # Find existing active subscription
+        # Find existing subscription (including expired ones)
         existing_subscription = (
             supabase.table("UserSubscriptions")
             .select("*")
             .eq("userId", user_id)
             .eq("subscriptionPlanId", plan_id)
-            .gt("expiresAt", datetime.utcnow().isoformat())
             .execute()
         )
 
         if existing_subscription.data and not recent_subscription.data:
-            # Renewal
-            logger.info("🔄 Renewing existing subscription")
+            # Check if expired or active
             current_expiry = datetime.fromisoformat(
                 existing_subscription.data[0]["expiresAt"].replace("Z", "+00:00")
             )
-            new_expiry_date = add_interval_to_date(
-                current_expiry, plan_data["interval"]
-            )
+            now = datetime.utcnow()
+
+            # If expired, renew from now, otherwise extend from current expiry
+            if current_expiry <= now:
+                logger.info("🔄 Renewing expired subscription from now")
+                new_expiry_date = add_interval_to_date(now, plan_data["interval"])
+            else:
+                logger.info("🔄 Extending active subscription from current expiry")
+                new_expiry_date = add_interval_to_date(
+                    current_expiry, plan_data["interval"]
+                )
 
             supabase.table("UserSubscriptions").update(
                 {

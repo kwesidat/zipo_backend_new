@@ -77,6 +77,8 @@ class ShippingAddress(BaseModel):
     city: str = Field(..., min_length=1)
     country: str = Field(..., min_length=1)
     additionalInfo: Optional[str] = None
+    customerLatitude: Optional[float] = Field(None, description="Customer's latitude for delivery")
+    customerLongitude: Optional[float] = Field(None, description="Customer's longitude for delivery")
 
 class BuyNowRequest(BaseModel):
     productId: str = Field(..., description="Product UUID")
@@ -87,6 +89,7 @@ class BuyNowRequest(BaseModel):
     enableCourierDelivery: bool = Field(False, description="Enable courier pickup and delivery")
     deliveryPriority: Optional[str] = Field(None, description="STANDARD, EXPRESS, or URGENT")
     deliveryNotes: Optional[str] = Field(None, description="Special delivery instructions")
+    calculatedDeliveryFee: Optional[float] = Field(None, description="Pre-calculated delivery fee from frontend")
 
 class CheckoutRequest(BaseModel):
     shippingAddress: ShippingAddress
@@ -95,6 +98,7 @@ class CheckoutRequest(BaseModel):
     enableCourierDelivery: bool = Field(False, description="Enable courier pickup and delivery")
     deliveryPriority: Optional[str] = Field(None, description="STANDARD, EXPRESS, or URGENT")
     deliveryNotes: Optional[str] = Field(None, description="Special delivery instructions")
+    calculatedDeliveryFee: Optional[float] = Field(None, description="Pre-calculated delivery fee from frontend")
 
 class PaymentInitResponse(BaseModel):
     authorization_url: str

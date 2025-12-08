@@ -526,7 +526,8 @@ async def buy_now(request: BuyNowRequest, current_user=Depends(get_current_user)
             discount,
         )
         tax = Decimal("0.00")  # Can be calculated based on business logic
-        total = subtotal - discount_amount + tax
+        delivery_fee = Decimal(str(request.calculatedDeliveryFee)) if request.calculatedDeliveryFee else Decimal("0.00")
+        total = subtotal - discount_amount + tax + delivery_fee
 
         # Create order
         order_id = str(uuid.uuid4())
@@ -841,7 +842,8 @@ async def checkout_cart(
             discount_amount = Decimal(str(cart.get("discountAmount", 0)))
 
         tax = Decimal(str(cart.get("tax", 0)))
-        total = subtotal - discount_amount + tax
+        delivery_fee = Decimal(str(request.calculatedDeliveryFee)) if request.calculatedDeliveryFee else Decimal("0.00")
+        total = subtotal - discount_amount + tax + delivery_fee
 
         # Create order
         order_id = str(uuid.uuid4())
