@@ -880,13 +880,31 @@ async def get_product_by_id(
 
         product = product_response.data[0]
 
-        # Parse fields if it's a JSON string
-        if product.get("fields") and isinstance(product.get("fields"), str):
-            try:
-                product["fields"] = json.loads(product["fields"])
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse fields JSON for product {product_id}")
+        # Parse fields if it's a JSON string and convert to dict
+        fields_value = product.get("fields")
+        if fields_value:
+            # If it's a string, parse it first
+            if isinstance(fields_value, str):
+                try:
+                    fields_value = json.loads(fields_value)
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse fields JSON for product {product_id}")
+                    fields_value = None
+
+            # Now convert to dict if needed
+            if isinstance(fields_value, list):
+                # If it's a list of dicts, merge them into one dict
+                merged_fields = {}
+                for item in fields_value:
+                    if isinstance(item, dict):
+                        merged_fields.update(item)
+                product["fields"] = merged_fields if merged_fields else None
+            elif isinstance(fields_value, dict):
+                product["fields"] = fields_value
+            else:
                 product["fields"] = None
+        else:
+            product["fields"] = None
 
         # Get seller info
         seller_info = None
