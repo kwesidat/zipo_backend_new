@@ -68,8 +68,9 @@ def calculate_delivery_fee(distance_km: Optional[float], priority: str) -> Decim
     return total_fee.quantize(Decimal("0.01"))
 
 
-def create_delivery_for_order(order: dict, order_items: List[dict]) -> Optional[dict]:
-    """Create delivery record for order if courier delivery was requested"""
+def create_delivery_for_order(order: dict, order_items: List[dict]) -> Optional[List[dict]]:
+    """Create delivery records for order if courier delivery was requested.
+    For multi-vendor orders, creates separate deliveries for each vendor."""
     try:
         shipping_address = order.get("shippingAddress", {})
         delivery_metadata = shipping_address.get("deliveryMetadata")
@@ -79,80 +80,104 @@ def create_delivery_for_order(order: dict, order_items: List[dict]) -> Optional[
             logger.info(f"Order {order['id']} does not require courier delivery")
             return None
 
-        logger.info(f"Creating delivery for order {order['id']}")
+        logger.info(f"Creating deliveries for order {order['id']}")
 
-        # Get seller address from first item (for multi-seller orders, this handles first seller)
-        # TODO: Handle multi-seller orders with multiple deliveries
-        seller_id = order_items[0]["sellerId"]
-        seller_response = (
-            supabase.table("users")
-            .select("address, city, country, phone_number, name")
-            .eq("user_id", seller_id)
-            .execute()
-        )
+        # Group order items by seller
+        sellers_items = {}
+        for item in order_items:
+            seller_id = item["sellerId"]
+            if seller_id not in sellers_items:
+                sellers_items[seller_id] = []
+            sellers_items[seller_id].append(item)
 
-        if not seller_response.data:
-            logger.error(f"Seller {seller_id} not found for delivery creation")
-            return None
+        created_deliveries = []
+        priority = delivery_metadata.get("deliveryPriority", "STANDARD")
+        now = datetime.now(timezone.utc)
 
-        seller = seller_response.data[0]
-
-        # Prepare pickup address (seller's address)
-        pickup_address = {
-            "address": seller.get("address", ""),
-            "city": seller.get("city", ""),
-            "country": seller.get("country", ""),
-            "additional_info": f"Seller: {seller.get('name', 'Unknown')}"
-        }
-
-        # Prepare delivery address (customer's shipping address)
+        # Prepare delivery address (customer's shipping address) - same for all vendors
         delivery_address = {
             "address": shipping_address.get("address", ""),
             "city": shipping_address.get("city", ""),
             "country": shipping_address.get("country", ""),
+            "latitude": shipping_address.get("latitude"),
+            "longitude": shipping_address.get("longitude"),
             "additional_info": shipping_address.get("additionalInfo", "")
         }
 
-        # Calculate delivery fee
-        priority = delivery_metadata.get("deliveryPriority", "STANDARD")
-        distance_km = None  # Can integrate Google Maps API here
-        delivery_fee = calculate_delivery_fee(distance_km, priority)
-        courier_fee = (delivery_fee * Decimal("0.70")).quantize(Decimal("0.01"))
-        platform_fee = (delivery_fee * Decimal("0.30")).quantize(Decimal("0.01"))
+        # Create a separate delivery for each vendor
+        for seller_id, items in sellers_items.items():
+            # Get seller details
+            seller_response = (
+                supabase.table("users")
+                .select("address, city, country, phone_number, name, latitude, longitude")
+                .eq("user_id", seller_id)
+                .execute()
+            )
 
-        # Create delivery record
-        delivery_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
+            if not seller_response.data:
+                logger.error(f"Seller {seller_id} not found, skipping delivery creation")
+                continue
 
-        delivery_data = {
-            "id": delivery_id,
-            "order_id": order["id"],
-            "pickup_address": pickup_address,
-            "delivery_address": delivery_address,
-            "pickup_contact_name": seller.get("name"),
-            "pickup_contact_phone": seller.get("phone_number"),
-            "delivery_contact_name": shipping_address.get("name"),
-            "delivery_contact_phone": shipping_address.get("phone"),
-            "scheduled_by_user": order["userId"],
-            "scheduled_by_type": "CUSTOMER",
-            "delivery_fee": float(delivery_fee),
-            "courier_fee": float(courier_fee),
-            "platform_fee": float(platform_fee),
-            "distance_km": distance_km,
-            "status": "PENDING",
-            "priority": priority,
-            "notes": delivery_metadata.get("deliveryNotes"),
-            "created_at": now.isoformat(),
-            "updated_at": now.isoformat(),
-        }
+            seller = seller_response.data[0]
 
-        delivery_response = supabase.table("Delivery").insert(delivery_data).execute()
+            # Prepare pickup address (seller's address) with coordinates
+            pickup_address = {
+                "address": seller.get("address", ""),
+                "city": seller.get("city", ""),
+                "country": seller.get("country", ""),
+                "latitude": seller.get("latitude"),
+                "longitude": seller.get("longitude"),
+                "additional_info": f"Vendor: {seller.get('name', 'Unknown')}"
+            }
 
-        if delivery_response.data:
-            logger.info(f"✅ Delivery {delivery_id} created for order {order['id']}")
-            return delivery_response.data[0]
+            # Calculate delivery fee
+            distance_km = None  # Can integrate Google Maps API here
+            delivery_fee = calculate_delivery_fee(distance_km, priority)
+            courier_fee = (delivery_fee * Decimal("0.70")).quantize(Decimal("0.01"))
+            platform_fee = (delivery_fee * Decimal("0.30")).quantize(Decimal("0.01"))
+
+            # Create notes with item details
+            item_titles = [item.get("title", "Item") for item in items]
+            items_note = f"Items: {', '.join(item_titles[:3])}" + (f" (+{len(item_titles)-3} more)" if len(item_titles) > 3 else "")
+            delivery_notes = f"{items_note}. {delivery_metadata.get('deliveryNotes', '')}".strip()
+
+            # Create delivery record for this vendor
+            delivery_id = str(uuid.uuid4())
+            delivery_data = {
+                "id": delivery_id,
+                "order_id": order["id"],
+                "pickup_address": pickup_address,
+                "delivery_address": delivery_address,
+                "pickup_contact_name": seller.get("name"),
+                "pickup_contact_phone": seller.get("phone_number"),
+                "delivery_contact_name": shipping_address.get("name"),
+                "delivery_contact_phone": shipping_address.get("phone"),
+                "scheduled_by_user": order["userId"],
+                "scheduled_by_type": "CUSTOMER",
+                "delivery_fee": float(delivery_fee),
+                "courier_fee": float(courier_fee),
+                "platform_fee": float(platform_fee),
+                "distance_km": distance_km,
+                "status": "PENDING",
+                "priority": priority,
+                "notes": delivery_notes,
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat(),
+            }
+
+            delivery_response = supabase.table("Delivery").insert(delivery_data).execute()
+
+            if delivery_response.data:
+                created_deliveries.append(delivery_response.data[0])
+                logger.info(f"✅ Delivery {delivery_id} created for vendor {seller.get('name')} in order {order['id']}")
+            else:
+                logger.error(f"❌ Failed to create delivery for vendor {seller_id} in order {order['id']}")
+
+        if created_deliveries:
+            logger.info(f"✅ Created {len(created_deliveries)} deliveries for order {order['id']}")
+            return created_deliveries
         else:
-            logger.error(f"❌ Failed to create delivery for order {order['id']}")
+            logger.error(f"❌ No deliveries created for order {order['id']}")
             return None
 
     except Exception as e:
