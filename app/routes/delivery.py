@@ -532,7 +532,7 @@ async def get_available_deliveries(
 
         deliveries_data = response.data or []
 
-        # Filter deliveries to only show those with useCourierService = true
+        # Filter deliveries to only show those with useCourierService = true and courierServiceStatus != ACCEPTED
         filtered_deliveries = []
         for delivery in deliveries_data:
             order_data = delivery.get("order")
@@ -541,9 +541,13 @@ async def get_available_deliveries(
             if isinstance(order_data, list):
                 order_data = order_data[0] if order_data else None
 
-            # Only include deliveries where order has useCourierService = true
+            # Only include deliveries where:
+            # 1. order has useCourierService = true
+            # 2. courierServiceStatus is not ACCEPTED (still available)
             if order_data and order_data.get("useCourierService") == True:
-                filtered_deliveries.append(delivery)
+                courier_status = order_data.get("courierServiceStatus")
+                if courier_status != "ACCEPTED":
+                    filtered_deliveries.append(delivery)
 
         total_count = len(filtered_deliveries)
 
@@ -1410,4 +1414,163 @@ async def get_delivery_courier_details(delivery_id: str, current_user=Depends(ge
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch courier details",
+        )
+
+
+# ========== COURIER: DASHBOARD OVERVIEW ==========
+
+
+@router.get("/courier/dashboard")
+async def get_courier_dashboard(current_user=Depends(get_current_user)):
+    """
+    Get courier dashboard overview with statistics:
+    - Total earnings (from completed deliveries)
+    - Total deliveries (all time)
+    - Completed deliveries count
+    - Pending deliveries count
+    - Active deliveries count (ACCEPTED, PICKED_UP, IN_TRANSIT)
+    - Average rating
+    - Available balance
+    - Recent deliveries
+    """
+    try:
+        user_id = current_user["user_id"]
+        user_type = current_user.get("user_type")
+
+        # Verify user is a courier
+        if user_type != "COURIER":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only couriers can view dashboard",
+            )
+
+        logger.info(f"Courier {user_id} fetching dashboard")
+
+        # Get courier profile
+        courier_response = (
+            supabase.table("Courier")
+            .select("*")
+            .eq("user_id", user_id)
+            .execute()
+        )
+
+        if not courier_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Courier profile not found",
+            )
+
+        courier = courier_response.data[0]
+        courier_id = courier["id"]
+
+        # Get all deliveries for this courier
+        all_deliveries = (
+            supabase.table("Delivery")
+            .select("*")
+            .eq("courier_id", courier_id)
+            .execute()
+        )
+
+        deliveries_data = all_deliveries.data or []
+
+        # Calculate statistics
+        total_deliveries = len(deliveries_data)
+        completed_deliveries = len([d for d in deliveries_data if d["status"] == "DELIVERED"])
+        pending_deliveries = len([d for d in deliveries_data if d["status"] == "PENDING"])
+        active_deliveries = len([
+            d for d in deliveries_data
+            if d["status"] in ["ACCEPTED", "PICKED_UP", "IN_TRANSIT"]
+        ])
+
+        # Get earnings from CourierEarning table
+        earnings_response = (
+            supabase.table("CourierEarning")
+            .select("amount, status, type")
+            .eq("courier_id", courier_id)
+            .execute()
+        )
+
+        earnings_data = earnings_response.data or []
+
+        # Calculate total earnings from completed deliveries
+        total_earnings = sum(
+            Decimal(str(earning["amount"]))
+            for earning in earnings_data
+            if earning["type"] == "DELIVERY_FEE"
+        )
+
+        # Calculate available balance (pending + completed but not withdrawn)
+        available_balance = sum(
+            Decimal(str(earning["amount"]))
+            for earning in earnings_data
+            if earning["status"] in ["PENDING", "COMPLETED"]
+        )
+
+        # Get recent deliveries (last 5)
+        recent_deliveries = (
+            supabase.table("Delivery")
+            .select("*")
+            .eq("courier_id", courier_id)
+            .order("updated_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+
+        recent_deliveries_data = recent_deliveries.data or []
+
+        # Transform recent deliveries
+        recent_deliveries_list = []
+        for delivery in recent_deliveries_data:
+            recent_deliveries_list.append({
+                "id": delivery["id"],
+                "order_id": delivery["order_id"],
+                "delivery_address": delivery["delivery_address"],
+                "delivery_fee": float(delivery["delivery_fee"]),
+                "courier_fee": float(delivery.get("courier_fee", 0)),
+                "status": delivery["status"],
+                "priority": delivery["priority"],
+                "created_at": delivery["created_at"],
+                "updated_at": delivery["updated_at"],
+            })
+
+        # Delivery status breakdown
+        status_breakdown = {
+            "pending": pending_deliveries,
+            "active": active_deliveries,
+            "completed": completed_deliveries,
+            "cancelled": len([d for d in deliveries_data if d["status"] == "CANCELLED"]),
+            "failed": len([d for d in deliveries_data if d["status"] == "FAILED"]),
+        }
+
+        logger.info(f"✅ Dashboard loaded for courier {user_id}")
+
+        return {
+            "courier_info": {
+                "courier_id": courier["id"],
+                "courier_code": courier.get("courier_code"),
+                "vehicle_type": courier.get("vehicle_type"),
+                "rating": courier.get("rating", 0),
+                "is_available": courier.get("is_available", True),
+                "is_verified": courier.get("verified", False),
+            },
+            "statistics": {
+                "total_deliveries": total_deliveries,
+                "completed_deliveries": completed_deliveries,
+                "pending_deliveries": pending_deliveries,
+                "active_deliveries": active_deliveries,
+                "total_earnings": float(total_earnings),
+                "available_balance": float(available_balance),
+                "average_rating": courier.get("rating", 0),
+            },
+            "status_breakdown": status_breakdown,
+            "recent_deliveries": recent_deliveries_list,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error fetching courier dashboard: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch courier dashboard",
         )
