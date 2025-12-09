@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from app.database import supabase
 from app.utils.auth_utils import AuthUtils
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import httpx
 import os
@@ -311,7 +311,8 @@ async def subscribe_to_plan(
             metadata["referralCode"] = request.referralCode
             logger.info(f"✅ Referral code included: {request.referralCode}")
         
-        # Callback URL for mobile
+        # Callback URL - redirects to our backend endpoint that processes the subscription
+        # This endpoint will verify the payment and create/update the subscription
         callback_url = f"{NEXT_PUBLIC_BASE_URL}/api/payment-callback"
         
         logger.info(f"Callback URL: {callback_url}")
@@ -380,6 +381,177 @@ async def subscribe_to_plan(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process subscription"
         )
+
+
+# ========== PAYMENT CALLBACK HANDLER (for mobile app redirects) ==========
+
+@router.get("/payment-callback")
+async def payment_callback(
+    reference: Optional[str] = Query(None, description="Payment reference"),
+    trxref: Optional[str] = Query(None, description="Transaction reference")
+):
+    """
+    Handle payment callback from Paystack (mobile app redirect).
+    This endpoint automatically verifies the payment and processes the subscription.
+    Used when users complete payment and are redirected back to the app.
+    """
+    try:
+        # Use reference or trxref (Paystack sends both)
+        payment_ref = reference or trxref
+
+        if not payment_ref:
+            return {
+                "success": False,
+                "message": "No payment reference provided"
+            }
+
+        logger.info(f"=== PAYMENT CALLBACK ===")
+        logger.info(f"Reference: {payment_ref}")
+
+        # Verify payment with Paystack
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{PAYSTACK_BASE_URL}/transaction/verify/{payment_ref}",
+                headers={
+                    "Authorization": f"Bearer {PAYSTACK_SECRET_KEY}"
+                },
+                timeout=30.0
+            )
+
+        if response.status_code != 200:
+            logger.error(f"Payment verification failed: {response.text}")
+            return {
+                "success": False,
+                "message": "Payment verification failed"
+            }
+
+        paystack_response = response.json()
+
+        if not paystack_response.get("status"):
+            return {
+                "success": False,
+                "message": "Payment verification failed"
+            }
+
+        data = paystack_response["data"]
+
+        if data["status"] != "success":
+            return {
+                "success": False,
+                "message": f"Payment status: {data['status']}"
+            }
+
+        # Extract metadata
+        metadata = data.get("metadata", {})
+        user_id = metadata.get("userId")
+        subscription_plan_id = metadata.get("subscriptionId")
+
+        if not user_id or not subscription_plan_id:
+            logger.warning("Missing userId or subscriptionId in metadata")
+            return {
+                "success": True,
+                "message": "Payment successful but missing subscription data",
+                "reference": payment_ref
+            }
+
+        logger.info(f"User ID: {user_id}, Plan ID: {subscription_plan_id}")
+
+        # Check if subscription exists
+        existing_subscription = supabase.table("UserSubscriptions").select(
+            "*"
+        ).eq("userId", user_id).eq("subscriptionPlanId", subscription_plan_id).execute()
+
+        # Get plan details
+        plan_response = supabase.table("SubscriptionPlans").select("*").eq(
+            "id", subscription_plan_id
+        ).execute()
+
+        if not plan_response.data:
+            logger.error(f"Plan not found: {subscription_plan_id}")
+            return {
+                "success": False,
+                "message": "Subscription plan not found"
+            }
+
+        plan = plan_response.data[0]
+        now = datetime.utcnow()
+
+        # Calculate new expiry date
+        interval_days = {
+            "DAILY": 1,
+            "WEEKLY": 7,
+            "MONTHLY": 30,
+            "QUARTERLY": 90,
+            "BIANNUALLY": 180,
+            "ANNUALLY": 365
+        }
+        days_to_add = interval_days.get(plan["interval"], 30)
+
+        if existing_subscription.data:
+            # Update existing subscription
+            existing = existing_subscription.data[0]
+            existing_expiry = datetime.fromisoformat(existing["expiresAt"].replace('Z', '+00:00'))
+
+            # If expired, renew from now, otherwise extend
+            if existing_expiry <= now:
+                new_expiry = now + timedelta(days=days_to_add)
+                logger.info(f"Renewing expired subscription from now")
+            else:
+                new_expiry = existing_expiry + timedelta(days=days_to_add)
+                logger.info(f"Extending active subscription")
+
+            supabase.table("UserSubscriptions").update({
+                "expiresAt": new_expiry.isoformat(),
+                "updatedAt": now.isoformat()
+            }).eq("id", existing["id"]).execute()
+
+            logger.info(f"✅ Subscription updated - expires: {new_expiry.isoformat()}")
+
+            return {
+                "success": True,
+                "message": "Subscription renewed successfully",
+                "reference": payment_ref,
+                "expiresAt": new_expiry.isoformat()
+            }
+        else:
+            # Create new subscription
+            new_expiry = now + timedelta(days=days_to_add)
+
+            subscription_data = {
+                "id": str(uuid.uuid4()),
+                "userId": user_id,
+                "subscriptionPlanId": subscription_plan_id,
+                "expiresAt": new_expiry.isoformat(),
+                "createdAt": now.isoformat(),
+                "updatedAt": now.isoformat()
+            }
+
+            create_response = supabase.table("UserSubscriptions").insert(
+                subscription_data
+            ).execute()
+
+            if create_response.data:
+                logger.info(f"✅ New subscription created - expires: {new_expiry.isoformat()}")
+
+                return {
+                    "success": True,
+                    "message": "Subscription created successfully",
+                    "reference": payment_ref,
+                    "expiresAt": new_expiry.isoformat()
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": "Failed to create subscription"
+                }
+
+    except Exception as e:
+        logger.error(f"Payment callback error: {str(e)}")
+        logger.exception(e)
+        return {
+            "success": False,
+            "message": "Internal server error"
+        }
 
 
 # ========== VERIFY SUBSCRIPTION PAYMENT ==========
