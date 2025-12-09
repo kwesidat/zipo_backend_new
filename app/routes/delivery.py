@@ -123,6 +123,8 @@ async def schedule_delivery(
             "paymentStatus": "PENDING",
             "currency": "GHS",
             "shippingAddress": request.delivery_address.dict(),
+            "useCourierService": True,  # Standalone deliveries always use courier service
+            "courierServiceStatus": "PENDING",
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "updatedAt": datetime.now(timezone.utc).isoformat(),
         }
@@ -410,6 +412,8 @@ async def verify_payment_and_schedule_delivery(
             "paymentGateway": "PAYSTACK",
             "currency": "GHS",
             "shippingAddress": delivery_data["delivery_address"],
+            "useCourierService": True,  # Standalone deliveries always use courier service
+            "courierServiceStatus": "PENDING",
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "updatedAt": datetime.now(timezone.utc).isoformat(),
         }
