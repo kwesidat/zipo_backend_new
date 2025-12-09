@@ -103,6 +103,31 @@ class DeliveryResponse(BaseModel):
     updated_at: datetime
 
 
+class OrderItemSummary(BaseModel):
+    """Order item summary for delivery"""
+    id: str
+    product_id: str
+    title: str
+    image: Optional[str]
+    quantity: int
+    price: Decimal
+    seller_id: str
+    seller_name: str
+    condition: Optional[str]
+
+
+class OrderSummary(BaseModel):
+    """Order summary for delivery"""
+    id: str
+    subtotal: Decimal
+    total: Decimal
+    currency: str
+    payment_status: str
+    items: List[OrderItemSummary]
+    item_count: int
+    is_multi_vendor: bool
+
+
 class AvailableDeliveryResponse(BaseModel):
     """Simplified delivery info for couriers browsing available deliveries"""
     id: str
@@ -122,6 +147,7 @@ class AvailableDeliveryResponse(BaseModel):
     estimated_delivery_time: Optional[datetime]
     notes: Optional[str]
     created_at: datetime
+    order: Optional[OrderSummary] = Field(None, description="Order details including items")
 
 
 class AcceptDeliveryRequest(BaseModel):

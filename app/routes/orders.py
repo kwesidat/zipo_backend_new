@@ -556,6 +556,7 @@ async def buy_now(request: BuyNowRequest, current_user=Depends(get_current_user)
             "subtotal": float(subtotal),
             "discountAmount": float(discount_amount),
             "tax": float(tax),
+            "deliveryFee": float(delivery_fee),
             "total": float(total),
             "status": "PENDING",
             "paymentStatus": "PENDING",
@@ -863,6 +864,7 @@ async def checkout_cart(
             "subtotal": float(subtotal),
             "discountAmount": float(discount_amount),
             "tax": float(tax),
+            "deliveryFee": float(delivery_fee),
             "total": float(total),
             "status": "PENDING",
             "paymentStatus": "PENDING",
@@ -1766,6 +1768,37 @@ async def get_user_orders(
                 for item in (items_response.data or [])
             ]
 
+            # Extract pickup and delivery addresses from shippingAddress JSONB
+            shipping_address = order.get("shippingAddress", {})
+            pickup_address = None
+            delivery_address = None
+
+            if isinstance(shipping_address, dict):
+                # For courier deliveries, extract pickup_address if it exists in metadata
+                delivery_metadata = shipping_address.get("deliveryMetadata", {})
+                if delivery_metadata and delivery_metadata.get("enableCourierDelivery"):
+                    # Get seller address from first item as pickup address
+                    if order_items:
+                        first_seller_id = order_items[0]["sellerId"]
+                        try:
+                            seller_response = supabase.table("users").select("address, city, country").eq("user_id", first_seller_id).execute()
+                            if seller_response.data:
+                                seller = seller_response.data[0]
+                                pickup_address = {
+                                    "street": seller.get("address", ""),
+                                    "city": seller.get("city", ""),
+                                    "country": seller.get("country", "")
+                                }
+                        except Exception as e:
+                            logger.error(f"Failed to fetch seller address for pickup: {str(e)}")
+
+                # Delivery address is the customer's shipping address
+                delivery_address = {
+                    "street": shipping_address.get("address", ""),
+                    "city": shipping_address.get("city", ""),
+                    "country": shipping_address.get("country", "")
+                }
+
             orders.append(
                 {
                     "id": order["id"],
@@ -1778,6 +1811,8 @@ async def get_user_orders(
                     "paymentStatus": order["paymentStatus"],
                     "currency": order["currency"],
                     "shippingAddress": order["shippingAddress"],
+                    "pickup_address": pickup_address,
+                    "delivery_address": delivery_address,
                     "trackingNumber": order.get("trackingNumber"),
                     "paymentMethod": order.get("paymentMethod"),
                     "paymentGateway": order.get("paymentGateway"),
@@ -1855,6 +1890,37 @@ async def get_order(order_id: str, current_user=Depends(get_current_user)):
             for item in (items_response.data or [])
         ]
 
+        # Extract pickup and delivery addresses from shippingAddress JSONB
+        shipping_address = order.get("shippingAddress", {})
+        pickup_address = None
+        delivery_address = None
+
+        if isinstance(shipping_address, dict):
+            # For courier deliveries, extract pickup_address if it exists in metadata
+            delivery_metadata = shipping_address.get("deliveryMetadata", {})
+            if delivery_metadata and delivery_metadata.get("enableCourierDelivery"):
+                # Get seller address from first item as pickup address
+                if order_items:
+                    first_seller_id = order_items[0]["sellerId"]
+                    try:
+                        seller_response = supabase.table("users").select("address, city, country").eq("user_id", first_seller_id).execute()
+                        if seller_response.data:
+                            seller = seller_response.data[0]
+                            pickup_address = {
+                                "street": seller.get("address", ""),
+                                "city": seller.get("city", ""),
+                                "country": seller.get("country", "")
+                            }
+                    except Exception as e:
+                        logger.error(f"Failed to fetch seller address for pickup: {str(e)}")
+
+            # Delivery address is the customer's shipping address
+            delivery_address = {
+                "street": shipping_address.get("address", ""),
+                "city": shipping_address.get("city", ""),
+                "country": shipping_address.get("country", "")
+            }
+
         return {
             "id": order["id"],
             "userId": order["userId"],
@@ -1866,6 +1932,8 @@ async def get_order(order_id: str, current_user=Depends(get_current_user)):
             "paymentStatus": order["paymentStatus"],
             "currency": order["currency"],
             "shippingAddress": order["shippingAddress"],
+            "pickup_address": pickup_address,
+            "delivery_address": delivery_address,
             "trackingNumber": order.get("trackingNumber"),
             "paymentMethod": order.get("paymentMethod"),
             "paymentGateway": order.get("paymentGateway"),

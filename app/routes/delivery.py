@@ -520,7 +520,7 @@ async def get_available_deliveries(
 
         # Build query - get PENDING deliveries with order details
         query = supabase.table("Delivery").select(
-            "*, order:order_id(id, useCourierService, courierServiceStatus)",
+            "*, order:order_id(id, useCourierService, courierServiceStatus, subtotal, total, currency, paymentStatus)",
             count="exact"
         ).eq("status", "PENDING")
 
@@ -558,6 +558,62 @@ async def get_available_deliveries(
         # Transform data
         deliveries = []
         for delivery in filtered_deliveries:
+            # Fetch order items for this delivery
+            order_summary = None
+            order_id = delivery["order_id"]
+
+            try:
+                # Get order items
+                order_items_response = (
+                    supabase.table("OrderItem")
+                    .select("*")
+                    .eq("orderId", order_id)
+                    .execute()
+                )
+
+                order_items_data = order_items_response.data or []
+
+                # Get order data
+                order_data = delivery.get("order")
+                if isinstance(order_data, list):
+                    order_data = order_data[0] if order_data else None
+
+                if order_data and order_items_data:
+                    # Build order item summaries
+                    order_items = []
+                    seller_ids = set()
+
+                    for item in order_items_data:
+                        order_items.append({
+                            "id": item["id"],
+                            "product_id": item["productId"],
+                            "title": item["title"],
+                            "image": item.get("image"),
+                            "quantity": item["quantity"],
+                            "price": Decimal(str(item["price"])),
+                            "seller_id": item["sellerId"],
+                            "seller_name": item["sellerName"],
+                            "condition": item.get("condition"),
+                        })
+                        seller_ids.add(item["sellerId"])
+
+                    # Check if multi-vendor
+                    is_multi_vendor = len(seller_ids) > 1
+
+                    order_summary = {
+                        "id": order_data["id"],
+                        "subtotal": Decimal(str(order_data.get("subtotal", 0))),
+                        "total": Decimal(str(order_data.get("total", 0))),
+                        "currency": order_data.get("currency", "GHS"),
+                        "payment_status": order_data.get("paymentStatus", "PENDING"),
+                        "items": order_items,
+                        "item_count": len(order_items),
+                        "is_multi_vendor": is_multi_vendor,
+                    }
+            except Exception as e:
+                logger.error(f"Failed to fetch order items for delivery {delivery['id']}: {str(e)}")
+                order_summary = None
+
             deliveries.append(
                 AvailableDeliveryResponse(
                     id=delivery["id"],
@@ -577,6 +633,7 @@ async def get_available_deliveries(
                     estimated_delivery_time=delivery.get("estimated_delivery_time"),
                     notes=delivery.get("notes"),
                     created_at=delivery["created_at"],
+                    order=order_summary,
                 )
             )
 
