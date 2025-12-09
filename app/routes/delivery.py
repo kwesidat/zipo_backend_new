@@ -496,6 +496,7 @@ async def get_available_deliveries(
     """
     Get all available deliveries that couriers can accept.
     Shows deliveries with status PENDING (not yet assigned to any courier).
+    Only shows orders where useCourierService = true.
     """
     try:
         user_id = current_user["user_id"]
@@ -513,8 +514,11 @@ async def get_available_deliveries(
         # Calculate offset
         offset = (page - 1) * page_size
 
-        # Build query - get PENDING deliveries (not assigned to any courier)
-        query = supabase.table("Delivery").select("*", count="exact").eq("status", "PENDING")
+        # Build query - get PENDING deliveries with order details
+        query = supabase.table("Delivery").select(
+            "*, order:order_id(id, useCourierService, courierServiceStatus)",
+            count="exact"
+        ).eq("status", "PENDING")
 
         # Filter by priority if provided
         if priority:
@@ -526,12 +530,26 @@ async def get_available_deliveries(
 
         response = query.execute()
 
-        total_count = response.count or 0
         deliveries_data = response.data or []
+
+        # Filter deliveries to only show those with useCourierService = true
+        filtered_deliveries = []
+        for delivery in deliveries_data:
+            order_data = delivery.get("order")
+
+            # Handle case where order might be a list or dict
+            if isinstance(order_data, list):
+                order_data = order_data[0] if order_data else None
+
+            # Only include deliveries where order has useCourierService = true
+            if order_data and order_data.get("useCourierService") == True:
+                filtered_deliveries.append(delivery)
+
+        total_count = len(filtered_deliveries)
 
         # Transform data
         deliveries = []
-        for delivery in deliveries_data:
+        for delivery in filtered_deliveries:
             deliveries.append(
                 AvailableDeliveryResponse(
                     id=delivery["id"],
@@ -559,7 +577,7 @@ async def get_available_deliveries(
         has_next = page < total_pages
         has_previous = page > 1
 
-        logger.info(f"✅ Retrieved {len(deliveries)} available deliveries for courier {user_id}")
+        logger.info(f"✅ Retrieved {len(deliveries)} available deliveries (with useCourierService=true) for courier {user_id}")
 
         return AvailableDeliveryListResponse(
             deliveries=deliveries,
@@ -681,6 +699,18 @@ async def accept_delivery(
 
         delivery = updated_delivery.data[0]
 
+        # Update the related Order's courierServiceStatus to ACCEPTED
+        order_id = delivery["order_id"]
+        order_update = supabase.table("Order").update({
+            "courierServiceStatus": "ACCEPTED",
+            "updatedAt": now.isoformat()
+        }).eq("id", order_id).execute()
+
+        if order_update.data:
+            logger.info(f"✅ Order {order_id} courierServiceStatus updated to ACCEPTED")
+        else:
+            logger.warning(f"⚠️ Failed to update Order courierServiceStatus for order {order_id}")
+
         # Create status history
         status_history_data = {
             "id": str(uuid.uuid4()),
@@ -696,6 +726,28 @@ async def accept_delivery(
             "total_deliveries": courier.get("total_deliveries", 0) + 1,
             "updated_at": now.isoformat(),
         }).eq("id", courier_id).execute()
+
+        # Create notification for customer
+        try:
+            notification_expiry = now + timedelta(days=7)
+            scheduled_info = ""
+            if delivery.get("scheduled_date"):
+                scheduled_info = f" scheduled for {delivery['scheduled_date']}"
+
+            customer_notification = {
+                "id": str(uuid.uuid4()),
+                "userId": delivery["scheduled_by_user"],
+                "title": "Courier Accepted Your Delivery!",
+                "notificationType": "SUCCESS",
+                "body": f"A courier ({courier.get('courier_code')}) has accepted your delivery{scheduled_info}. You will receive updates as your delivery progresses.",
+                "dismissed": False,
+                "createdAt": now.isoformat(),
+                "expiresAt": notification_expiry.isoformat(),
+            }
+            supabase.table("Notification").insert(customer_notification).execute()
+            logger.info(f"✅ Customer notification sent for delivery {request.delivery_id}")
+        except Exception as notif_error:
+            logger.error(f"⚠️ Failed to create customer notification: {str(notif_error)}")
 
         logger.info(f"✅ Courier {user_id} accepted delivery {request.delivery_id}")
 
