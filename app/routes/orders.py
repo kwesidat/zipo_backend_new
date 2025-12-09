@@ -1169,6 +1169,88 @@ async def verify_payment(
             order = order_response.data[0]
             order_items = order.get("items") or order.get("OrderItem") or []
 
+            # ========== CREATE DELIVERY RECORD IF COURIER SERVICE IS ENABLED ==========
+            if order.get("useCourierService") and order.get("courierServiceStatus") == "PENDING":
+                try:
+                    logger.info(f"Creating delivery record for order {order_id} with courier service")
+
+                    # Get seller location as pickup address (first item's seller)
+                    first_item = order_items[0] if order_items else None
+                    pickup_address = {}
+                    pickup_contact_name = ""
+                    pickup_contact_phone = ""
+
+                    if first_item:
+                        # Get seller info
+                        seller_response = supabase.table("users").select("*").eq("user_id", first_item["sellerId"]).execute()
+                        if seller_response.data:
+                            seller = seller_response.data[0]
+                            pickup_address = {
+                                "street": seller.get("address", ""),
+                                "city": seller.get("city", ""),
+                                "country": seller.get("country", ""),
+                            }
+                            pickup_contact_name = seller.get("name", "")
+                            pickup_contact_phone = seller.get("phone_number", "")
+
+                    # Get delivery address from order
+                    shipping_address = order.get("shippingAddress", {})
+                    delivery_metadata = shipping_address.get("deliveryMetadata", {}) if isinstance(shipping_address, dict) else {}
+
+                    delivery_address = {
+                        "street": shipping_address.get("street", "") if isinstance(shipping_address, dict) else "",
+                        "city": shipping_address.get("city", "") if isinstance(shipping_address, dict) else "",
+                        "country": shipping_address.get("country", "") if isinstance(shipping_address, dict) else "",
+                    }
+
+                    delivery_contact_name = shipping_address.get("fullName", "") if isinstance(shipping_address, dict) else ""
+                    delivery_contact_phone = shipping_address.get("phoneNumber", "") if isinstance(shipping_address, dict) else ""
+
+                    # Calculate delivery fee (use from order or calculate)
+                    delivery_fee = Decimal(str(order.get("deliveryFee", 0)))
+                    if delivery_fee == 0:
+                        # Default fee calculation
+                        from app.routes.delivery import calculate_delivery_fee, calculate_courier_and_platform_fees
+                        delivery_fee = calculate_delivery_fee(None, delivery_metadata.get("priority", "STANDARD"))
+
+                    courier_fee, platform_fee = calculate_courier_and_platform_fees(delivery_fee)
+
+                    # Create delivery record
+                    delivery_id = str(uuid.uuid4())
+                    delivery_data = {
+                        "id": delivery_id,
+                        "order_id": order_id,
+                        "pickup_address": pickup_address,
+                        "delivery_address": delivery_address,
+                        "pickup_contact_name": pickup_contact_name,
+                        "pickup_contact_phone": pickup_contact_phone,
+                        "delivery_contact_name": delivery_contact_name,
+                        "delivery_contact_phone": delivery_contact_phone,
+                        "scheduled_by_user": order["userId"],
+                        "scheduled_by_type": "CUSTOMER",
+                        "delivery_fee": float(delivery_fee),
+                        "courier_fee": float(courier_fee),
+                        "platform_fee": float(platform_fee),
+                        "distance_km": delivery_metadata.get("distance_km"),
+                        "status": "PENDING",
+                        "priority": delivery_metadata.get("priority", "STANDARD"),
+                        "scheduled_date": delivery_metadata.get("scheduled_date"),
+                        "notes": delivery_metadata.get("deliveryNotes"),
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+
+                    delivery_response = supabase.table("Delivery").insert(delivery_data).execute()
+
+                    if delivery_response.data:
+                        logger.info(f"✅ Delivery record {delivery_id} created for order {order_id}")
+                    else:
+                        logger.warning(f"⚠️ Failed to create delivery record for order {order_id}")
+
+                except Exception as delivery_error:
+                    # Don't fail the whole order if delivery creation fails
+                    logger.error(f"⚠️ Failed to create delivery record: {str(delivery_error)}")
+
             # Create notifications for buyer and sellers
             now = datetime.now(timezone.utc)
             notification_expiry = now + timedelta(days=30)
