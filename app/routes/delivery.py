@@ -983,6 +983,29 @@ async def update_delivery_status(
 
         delivery = updated_delivery.data[0]
 
+        # Update the related Order's courierServiceStatus to match delivery status
+        order_id = delivery["order_id"]
+        order_courier_status_map = {
+            "ACCEPTED": "ACCEPTED",
+            "PICKED_UP": "PICKED_UP",
+            "IN_TRANSIT": "IN_TRANSIT",
+            "DELIVERED": "DELIVERED",
+            "CANCELLED": "CANCELLED",
+            "FAILED": "FAILED",
+        }
+
+        new_courier_status = order_courier_status_map.get(request.status.value)
+        if new_courier_status:
+            order_update = supabase.table("Order").update({
+                "courierServiceStatus": new_courier_status,
+                "updatedAt": now.isoformat()
+            }).eq("id", order_id).execute()
+
+            if order_update.data:
+                logger.info(f"✅ Order {order_id} courierServiceStatus updated to {new_courier_status}")
+            else:
+                logger.warning(f"⚠️ Failed to update Order courierServiceStatus for order {order_id}")
+
         # Create status history
         status_history_data = {
             "id": str(uuid.uuid4()),
@@ -993,6 +1016,98 @@ async def update_delivery_status(
             "created_at": now.isoformat(),
         }
         supabase.table("DeliveryStatusHistory").insert(status_history_data).execute()
+
+        # Create notifications for all parties involved
+        try:
+            notification_expiry = now + timedelta(days=7)
+
+            # Status-specific notification messages
+            status_messages = {
+                "PICKED_UP": {
+                    "customer_title": "Order Picked Up",
+                    "customer_body": f"Your order has been picked up by the courier and is on its way!",
+                    "seller_title": "Order Picked Up",
+                    "seller_body": f"Courier has picked up the order and delivery is in progress.",
+                    "type": "INFO"
+                },
+                "IN_TRANSIT": {
+                    "customer_title": "Order In Transit",
+                    "customer_body": f"Your order is currently in transit and will arrive soon.",
+                    "seller_title": "Order In Transit",
+                    "seller_body": f"The order is in transit to the customer.",
+                    "type": "INFO"
+                },
+                "DELIVERED": {
+                    "customer_title": "Order Delivered Successfully!",
+                    "customer_body": f"Your order has been delivered. Thank you for choosing our service!",
+                    "seller_title": "Order Delivered Successfully",
+                    "seller_body": f"The order has been successfully delivered to the customer.",
+                    "type": "SUCCESS"
+                },
+                "CANCELLED": {
+                    "customer_title": "Delivery Cancelled",
+                    "customer_body": f"Your delivery has been cancelled. {request.notes or 'Please contact support for more details.'}",
+                    "seller_title": "Delivery Cancelled",
+                    "seller_body": f"The delivery has been cancelled by the courier. {request.notes or ''}",
+                    "type": "ERROR"
+                },
+                "FAILED": {
+                    "customer_title": "Delivery Failed",
+                    "customer_body": f"Delivery attempt failed. {request.notes or 'Our team will contact you shortly.'}",
+                    "seller_title": "Delivery Failed",
+                    "seller_body": f"Delivery attempt failed. {request.notes or 'Customer will be contacted.'}",
+                    "type": "ERROR"
+                }
+            }
+
+            status_info = status_messages.get(request.status.value)
+
+            if status_info:
+                # Notify customer (scheduled_by_user)
+                customer_notification = {
+                    "id": str(uuid.uuid4()),
+                    "userId": delivery["scheduled_by_user"],
+                    "title": status_info["customer_title"],
+                    "notificationType": status_info["type"],
+                    "body": status_info["customer_body"],
+                    "dismissed": False,
+                    "createdAt": now.isoformat(),
+                    "expiresAt": notification_expiry.isoformat(),
+                }
+                supabase.table("Notification").insert(customer_notification).execute()
+                logger.info(f"✅ Customer notification sent for delivery {delivery_id} status {request.status.value}")
+
+                # Get order items to notify sellers
+                order_id = delivery["order_id"]
+                order_items_response = (
+                    supabase.table("OrderItem")
+                    .select("sellerId")
+                    .eq("orderId", order_id)
+                    .execute()
+                )
+
+                if order_items_response.data:
+                    # Get unique seller IDs
+                    seller_ids = set(item["sellerId"] for item in order_items_response.data if item.get("sellerId"))
+
+                    # Notify each seller
+                    for seller_id in seller_ids:
+                        seller_notification = {
+                            "id": str(uuid.uuid4()),
+                            "userId": seller_id,
+                            "title": status_info["seller_title"],
+                            "notificationType": status_info["type"],
+                            "body": status_info["seller_body"],
+                            "dismissed": False,
+                            "createdAt": now.isoformat(),
+                            "expiresAt": notification_expiry.isoformat(),
+                        }
+                        supabase.table("Notification").insert(seller_notification).execute()
+
+                    logger.info(f"✅ Seller notifications sent to {len(seller_ids)} sellers for delivery {delivery_id}")
+
+        except Exception as notif_error:
+            logger.error(f"⚠️ Failed to create notifications for delivery status update: {str(notif_error)}")
 
         # Update courier completed deliveries if status is DELIVERED
         if request.status == DeliveryStatus.DELIVERED:
