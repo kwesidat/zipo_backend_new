@@ -584,13 +584,24 @@ async def get_available_deliveries(
                     seller_ids = set()
 
                     for item in order_items_data:
+                        # Handle None or invalid price values
+                        try:
+                            price_value = item.get("price")
+                            if price_value is None or price_value == "":
+                                price = Decimal("0")
+                            else:
+                                price = Decimal(str(price_value))
+                        except Exception as price_error:
+                            logger.warning(f"Invalid price for item {item.get('id')}: {price_value}, defaulting to 0")
+                            price = Decimal("0")
+
                         order_items.append({
                             "id": item["id"],
                             "product_id": item["productId"],
                             "title": item["title"],
                             "image": item.get("image"),
                             "quantity": item["quantity"],
-                            "price": Decimal(str(item["price"])),
+                            "price": price,
                             "seller_id": item["sellerId"],
                             "seller_name": item["sellerName"],
                             "condition": item.get("condition"),
@@ -600,10 +611,23 @@ async def get_available_deliveries(
                     # Check if multi-vendor
                     is_multi_vendor = len(seller_ids) > 1
 
+                    # Safely convert subtotal and total
+                    try:
+                        subtotal_value = order_data.get("subtotal", 0)
+                        subtotal = Decimal(str(subtotal_value)) if subtotal_value not in [None, ""] else Decimal("0")
+                    except:
+                        subtotal = Decimal("0")
+
+                    try:
+                        total_value = order_data.get("total", 0)
+                        total = Decimal(str(total_value)) if total_value not in [None, ""] else Decimal("0")
+                    except:
+                        total = Decimal("0")
+
                     order_summary = {
                         "id": order_data["id"],
-                        "subtotal": Decimal(str(order_data.get("subtotal", 0))),
-                        "total": Decimal(str(order_data.get("total", 0))),
+                        "subtotal": subtotal,
+                        "total": total,
                         "currency": order_data.get("currency", "GHS"),
                         "payment_status": order_data.get("paymentStatus", "PENDING"),
                         "items": order_items,
@@ -613,6 +637,19 @@ async def get_available_deliveries(
             except Exception as e:
                 logger.error(f"Failed to fetch order items for delivery {delivery['id']}: {str(e)}")
                 order_summary = None
+
+            # Safely convert delivery fees
+            try:
+                delivery_fee_value = delivery.get("delivery_fee", 0)
+                delivery_fee = Decimal(str(delivery_fee_value)) if delivery_fee_value not in [None, ""] else Decimal("0")
+            except:
+                delivery_fee = Decimal("0")
+
+            try:
+                courier_fee_value = delivery.get("courier_fee", 0)
+                courier_fee = Decimal(str(courier_fee_value)) if courier_fee_value not in [None, ""] else Decimal("0")
+            except:
+                courier_fee = Decimal("0")
 
             deliveries.append(
                 AvailableDeliveryResponse(
@@ -624,8 +661,8 @@ async def get_available_deliveries(
                     pickup_contact_phone=delivery.get("pickup_contact_phone"),
                     delivery_contact_name=delivery.get("delivery_contact_name"),
                     delivery_contact_phone=delivery.get("delivery_contact_phone"),
-                    delivery_fee=Decimal(str(delivery["delivery_fee"])),
-                    courier_fee=Decimal(str(delivery.get("courier_fee", 0))),
+                    delivery_fee=delivery_fee,
+                    courier_fee=courier_fee,
                     distance_km=delivery.get("distance_km"),
                     priority=DeliveryPriority(delivery["priority"]),
                     scheduled_date=delivery.get("scheduled_date"),
