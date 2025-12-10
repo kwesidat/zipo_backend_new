@@ -83,6 +83,17 @@ def calculate_courier_and_platform_fees(delivery_fee: Decimal) -> tuple[Decimal,
     return courier_fee, platform_fee
 
 
+def safe_decimal_convert(value, default: Decimal = Decimal("0")) -> Decimal:
+    """Safely convert a value to Decimal, handling None, empty strings, and invalid values"""
+    if value is None or value == "":
+        return default
+    try:
+        return Decimal(str(value))
+    except (ValueError, TypeError, Exception):
+        logger.warning(f"Invalid decimal conversion for value: {value}, using default {default}")
+        return default
+
+
 # ========== CASE 2: CUSTOMER SCHEDULES STANDALONE DELIVERY (ZipoExpress) ==========
 
 
@@ -190,9 +201,9 @@ async def schedule_delivery(
             delivery_contact_phone=delivery.get("delivery_contact_phone"),
             scheduled_by_user=delivery["scheduled_by_user"],
             scheduled_by_type=UserType(delivery["scheduled_by_type"]),
-            delivery_fee=Decimal(str(delivery["delivery_fee"])),
-            courier_fee=Decimal(str(delivery.get("courier_fee", 0))),
-            platform_fee=Decimal(str(delivery.get("platform_fee", 0))),
+            delivery_fee=safe_decimal_convert(delivery.get("delivery_fee")),
+            courier_fee=safe_decimal_convert(delivery.get("courier_fee")),
+            platform_fee=safe_decimal_convert(delivery.get("platform_fee")),
             distance_km=delivery.get("distance_km"),
             status=DeliveryStatus(delivery["status"]),
             priority=DeliveryPriority(delivery["priority"]),
@@ -585,15 +596,7 @@ async def get_available_deliveries(
 
                     for item in order_items_data:
                         # Handle None or invalid price values
-                        try:
-                            price_value = item.get("price")
-                            if price_value is None or price_value == "":
-                                price = Decimal("0")
-                            else:
-                                price = Decimal(str(price_value))
-                        except Exception as price_error:
-                            logger.warning(f"Invalid price for item {item.get('id')}: {price_value}, defaulting to 0")
-                            price = Decimal("0")
+                        price = safe_decimal_convert(item.get("price"))
 
                         order_items.append({
                             "id": item["id"],
@@ -612,17 +615,8 @@ async def get_available_deliveries(
                     is_multi_vendor = len(seller_ids) > 1
 
                     # Safely convert subtotal and total
-                    try:
-                        subtotal_value = order_data.get("subtotal", 0)
-                        subtotal = Decimal(str(subtotal_value)) if subtotal_value not in [None, ""] else Decimal("0")
-                    except:
-                        subtotal = Decimal("0")
-
-                    try:
-                        total_value = order_data.get("total", 0)
-                        total = Decimal(str(total_value)) if total_value not in [None, ""] else Decimal("0")
-                    except:
-                        total = Decimal("0")
+                    subtotal = safe_decimal_convert(order_data.get("subtotal"))
+                    total = safe_decimal_convert(order_data.get("total"))
 
                     order_summary = {
                         "id": order_data["id"],
@@ -639,17 +633,8 @@ async def get_available_deliveries(
                 order_summary = None
 
             # Safely convert delivery fees
-            try:
-                delivery_fee_value = delivery.get("delivery_fee", 0)
-                delivery_fee = Decimal(str(delivery_fee_value)) if delivery_fee_value not in [None, ""] else Decimal("0")
-            except:
-                delivery_fee = Decimal("0")
-
-            try:
-                courier_fee_value = delivery.get("courier_fee", 0)
-                courier_fee = Decimal(str(courier_fee_value)) if courier_fee_value not in [None, ""] else Decimal("0")
-            except:
-                courier_fee = Decimal("0")
+            delivery_fee = safe_decimal_convert(delivery.get("delivery_fee"))
+            courier_fee = safe_decimal_convert(delivery.get("courier_fee"))
 
             deliveries.append(
                 AvailableDeliveryResponse(
@@ -865,9 +850,9 @@ async def accept_delivery(
             delivery_contact_phone=delivery.get("delivery_contact_phone"),
             scheduled_by_user=delivery["scheduled_by_user"],
             scheduled_by_type=UserType(delivery["scheduled_by_type"]),
-            delivery_fee=Decimal(str(delivery["delivery_fee"])),
-            courier_fee=Decimal(str(delivery.get("courier_fee", 0))),
-            platform_fee=Decimal(str(delivery.get("platform_fee", 0))),
+            delivery_fee=safe_decimal_convert(delivery.get("delivery_fee")),
+            courier_fee=safe_decimal_convert(delivery.get("courier_fee")),
+            platform_fee=safe_decimal_convert(delivery.get("platform_fee")),
             distance_km=delivery.get("distance_km"),
             status=DeliveryStatus(delivery["status"]),
             priority=DeliveryPriority(delivery["priority"]),
@@ -1017,7 +1002,7 @@ async def update_delivery_status(
             }).eq("id", courier_id).execute()
 
             # Create courier earning record
-            courier_fee = Decimal(str(delivery.get("courier_fee", 0)))
+            courier_fee = safe_decimal_convert(delivery.get("courier_fee"))
             if courier_fee > 0:
                 earning_data = {
                     "id": str(uuid.uuid4()),
@@ -1045,9 +1030,9 @@ async def update_delivery_status(
             delivery_contact_phone=delivery.get("delivery_contact_phone"),
             scheduled_by_user=delivery["scheduled_by_user"],
             scheduled_by_type=UserType(delivery["scheduled_by_type"]),
-            delivery_fee=Decimal(str(delivery["delivery_fee"])),
-            courier_fee=Decimal(str(delivery.get("courier_fee", 0))),
-            platform_fee=Decimal(str(delivery.get("platform_fee", 0))),
+            delivery_fee=safe_decimal_convert(delivery.get("delivery_fee")),
+            courier_fee=safe_decimal_convert(delivery.get("courier_fee")),
+            platform_fee=safe_decimal_convert(delivery.get("platform_fee")),
             distance_km=delivery.get("distance_km"),
             status=DeliveryStatus(delivery["status"]),
             priority=DeliveryPriority(delivery["priority"]),
@@ -1085,7 +1070,7 @@ async def get_courier_deliveries(
     current_user=Depends(get_current_user),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    status: Optional[str] = None,
+    delivery_status: Optional[str] = None,
 ):
     """
     Get all deliveries assigned to the current courier.
@@ -1127,8 +1112,8 @@ async def get_courier_deliveries(
         query = supabase.table("Delivery").select("*", count="exact").eq("courier_id", courier_id)
 
         # Filter by status if provided
-        if status:
-            query = query.eq("status", status)
+        if delivery_status:
+            query = query.eq("status", delivery_status)
 
         # Order by updated date (most recent first)
         query = query.order("updated_at", desc=True)
@@ -1155,9 +1140,9 @@ async def get_courier_deliveries(
                     delivery_contact_phone=delivery.get("delivery_contact_phone"),
                     scheduled_by_user=delivery["scheduled_by_user"],
                     scheduled_by_type=UserType(delivery["scheduled_by_type"]),
-                    delivery_fee=Decimal(str(delivery["delivery_fee"])),
-                    courier_fee=Decimal(str(delivery.get("courier_fee", 0))),
-                    platform_fee=Decimal(str(delivery.get("platform_fee", 0))),
+                    delivery_fee=safe_decimal_convert(delivery.get("delivery_fee")),
+                    courier_fee=safe_decimal_convert(delivery.get("courier_fee")),
+                    platform_fee=safe_decimal_convert(delivery.get("platform_fee")),
                     distance_km=delivery.get("distance_km"),
                     status=DeliveryStatus(delivery["status"]),
                     priority=DeliveryPriority(delivery["priority"]),
@@ -1213,7 +1198,7 @@ async def get_my_deliveries(
     current_user=Depends(get_current_user),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    status: Optional[str] = None,
+    delivery_status: Optional[str] = None,
 ):
     """
     Get all deliveries scheduled by the current user.
@@ -1231,8 +1216,8 @@ async def get_my_deliveries(
         query = supabase.table("Delivery").select("*", count="exact").eq("scheduled_by_user", user_id)
 
         # Filter by status if provided
-        if status:
-            query = query.eq("status", status)
+        if delivery_status:
+            query = query.eq("status", delivery_status)
 
         # Order by creation date (most recent first)
         query = query.order("created_at", desc=True)
@@ -1259,9 +1244,9 @@ async def get_my_deliveries(
                     delivery_contact_phone=delivery.get("delivery_contact_phone"),
                     scheduled_by_user=delivery["scheduled_by_user"],
                     scheduled_by_type=UserType(delivery["scheduled_by_type"]),
-                    delivery_fee=Decimal(str(delivery["delivery_fee"])),
-                    courier_fee=Decimal(str(delivery.get("courier_fee", 0))),
-                    platform_fee=Decimal(str(delivery.get("platform_fee", 0))),
+                    delivery_fee=safe_decimal_convert(delivery.get("delivery_fee")),
+                    courier_fee=safe_decimal_convert(delivery.get("courier_fee")),
+                    platform_fee=safe_decimal_convert(delivery.get("platform_fee")),
                     distance_km=delivery.get("distance_km"),
                     status=DeliveryStatus(delivery["status"]),
                     priority=DeliveryPriority(delivery["priority"]),
@@ -1366,9 +1351,9 @@ async def get_delivery(delivery_id: str, current_user=Depends(get_current_user))
             delivery_contact_phone=delivery.get("delivery_contact_phone"),
             scheduled_by_user=delivery["scheduled_by_user"],
             scheduled_by_type=UserType(delivery["scheduled_by_type"]),
-            delivery_fee=Decimal(str(delivery["delivery_fee"])),
-            courier_fee=Decimal(str(delivery.get("courier_fee", 0))),
-            platform_fee=Decimal(str(delivery.get("platform_fee", 0))),
+            delivery_fee=safe_decimal_convert(delivery.get("delivery_fee")),
+            courier_fee=safe_decimal_convert(delivery.get("courier_fee")),
+            platform_fee=safe_decimal_convert(delivery.get("platform_fee")),
             distance_km=delivery.get("distance_km"),
             status=DeliveryStatus(delivery["status"]),
             priority=DeliveryPriority(delivery["priority"]),
@@ -1592,14 +1577,14 @@ async def get_courier_dashboard(current_user=Depends(get_current_user)):
 
         # Calculate total earnings from completed deliveries
         total_earnings = sum(
-            Decimal(str(earning["amount"]))
+            safe_decimal_convert(earning.get("amount"))
             for earning in earnings_data
             if earning["type"] == "DELIVERY_FEE"
         )
 
         # Calculate available balance (pending + completed but not withdrawn)
         available_balance = sum(
-            Decimal(str(earning["amount"]))
+            safe_decimal_convert(earning.get("amount"))
             for earning in earnings_data
             if earning["status"] in ["PENDING", "COMPLETED"]
         )
