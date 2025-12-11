@@ -263,6 +263,8 @@ class SellerOrder(BaseModel):
     trackingNumber: Optional[str] = None
     paymentMethod: Optional[str] = None
     paymentGateway: Optional[str] = None
+    useCourierService: Optional[bool] = None
+    courierServiceStatus: Optional[str] = None
     createdAt: datetime
     updatedAt: datetime
     items: List[SellerOrderItem]

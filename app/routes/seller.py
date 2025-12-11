@@ -1926,6 +1926,8 @@ async def get_seller_orders(
                     trackingNumber=order_data.get("trackingNumber"),
                     paymentMethod=order_data.get("paymentMethod"),
                     paymentGateway=order_data.get("paymentGateway"),
+                    useCourierService=order_data.get("useCourierService"),
+                    courierServiceStatus=order_data.get("courierServiceStatus"),
                     createdAt=parse_datetime_to_utc(order_data["createdAt"]),
                     updatedAt=parse_datetime_to_utc(order_data["updatedAt"]),
                     items=seller_order_items,

@@ -133,6 +133,8 @@ class OrderResponse(BaseModel):
     trackingNumber: Optional[str]
     paymentMethod: Optional[str]
     paymentGateway: Optional[PaymentGateway]
+    useCourierService: Optional[bool] = None
+    courierServiceStatus: Optional[str] = None
     createdAt: datetime
     updatedAt: datetime
     items: List[OrderItemResponse]
