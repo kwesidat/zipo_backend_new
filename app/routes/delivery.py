@@ -52,16 +52,49 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         )
 
 
-def calculate_delivery_fee(distance_km: Optional[float], priority: str) -> Decimal:
-    """Calculate delivery fee based on distance and priority"""
-    base_fee = Decimal("10.00")  # Base fee in GHS
+def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Calculate distance between two points in kilometers using Haversine formula
+    """
+    from math import radians, cos, sin, asin, sqrt
 
-    if distance_km:
-        # Add GHS 2 per km
-        distance_fee = Decimal(str(distance_km)) * Decimal("2.00")
-    else:
-        # Default distance fee if no distance provided
-        distance_fee = Decimal("20.00")
+    # Convert decimal degrees to radians
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+
+    # Haversine formula
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a))
+
+    # Radius of earth in kilometers
+    r = 6371
+
+    return c * r
+
+
+def calculate_delivery_fee(
+    pickup_lat: Optional[float] = None,
+    pickup_lon: Optional[float] = None,
+    delivery_lat: Optional[float] = None,
+    delivery_lon: Optional[float] = None,
+    priority: str = "STANDARD",
+    distance_km: Optional[float] = None
+) -> Decimal:
+    """
+    Calculate delivery fee based on distance and priority
+    Formula: distance_km × 15.00 × priority_multiplier
+    """
+    # Calculate distance if coordinates provided
+    if distance_km is None and all([pickup_lat, pickup_lon, delivery_lat, delivery_lon]):
+        distance_km = calculate_distance(pickup_lat, pickup_lon, delivery_lat, delivery_lon)
+
+    # Default to 2km if no distance available
+    if distance_km is None:
+        distance_km = 2.0
+
+    # Base rate per kilometer
+    base_rate_per_km = Decimal("15.00")
 
     # Priority multipliers
     priority_multipliers = {
@@ -70,10 +103,14 @@ def calculate_delivery_fee(distance_km: Optional[float], priority: str) -> Decim
         "URGENT": Decimal("2.0"),
     }
 
+    # Get multiplier (default to STANDARD if not found)
     multiplier = priority_multipliers.get(priority, Decimal("1.0"))
-    total_fee = (base_fee + distance_fee) * multiplier
 
-    return total_fee.quantize(Decimal("0.01"))
+    # Calculate fee: distance × 15 × priority_multiplier
+    delivery_fee = Decimal(str(distance_km)) * base_rate_per_km * multiplier
+
+    # Round to 2 decimal places
+    return delivery_fee.quantize(Decimal("0.01"))
 
 
 def calculate_courier_and_platform_fees(delivery_fee: Decimal) -> tuple[Decimal, Decimal]:
@@ -116,10 +153,26 @@ async def schedule_delivery(
         # This is a delivery-only order (no product purchase)
         order_id = str(uuid.uuid4())
 
-        # Calculate delivery fee
-        distance_km = None  # You can integrate Google Maps Distance API here
-        delivery_fee = calculate_delivery_fee(distance_km, request.priority.value)
+        # Calculate delivery fee using coordinates
+        delivery_fee = calculate_delivery_fee(
+            pickup_lat=request.pickup_address.latitude,
+            pickup_lon=request.pickup_address.longitude,
+            delivery_lat=request.delivery_address.latitude,
+            delivery_lon=request.delivery_address.longitude,
+            priority=request.priority.value
+        )
         courier_fee, platform_fee = calculate_courier_and_platform_fees(delivery_fee)
+
+        # Calculate actual distance for storage
+        distance_km = None
+        if all([request.pickup_address.latitude, request.pickup_address.longitude,
+                request.delivery_address.latitude, request.delivery_address.longitude]):
+            distance_km = calculate_distance(
+                request.pickup_address.latitude,
+                request.pickup_address.longitude,
+                request.delivery_address.latitude,
+                request.delivery_address.longitude
+            )
 
         # Create order for tracking purposes
         order_data = {
@@ -248,9 +301,14 @@ async def initialize_delivery_payment(
 
         logger.info(f"🔄 Initializing delivery payment for user {user_id}")
 
-        # Calculate delivery fee
-        distance_km = None  # You can calculate this using addresses if needed
-        delivery_fee = calculate_delivery_fee(distance_km, request.priority.value)
+        # Calculate delivery fee using coordinates
+        delivery_fee = calculate_delivery_fee(
+            pickup_lat=request.pickup_address.latitude,
+            pickup_lon=request.pickup_address.longitude,
+            delivery_lat=request.delivery_address.latitude,
+            delivery_lon=request.delivery_address.longitude,
+            priority=request.priority.value
+        )
         courier_fee, platform_fee = calculate_courier_and_platform_fees(delivery_fee)
 
         logger.info(f"💰 Calculated fee: {delivery_fee} GHS (Courier: {courier_fee}, Platform: {platform_fee})")
@@ -1510,7 +1568,10 @@ async def calculate_delivery_fee_endpoint(
     try:
         distance_km = request.distance_km
 
-        fee = calculate_delivery_fee(distance_km, request.priority.value)
+        fee = calculate_delivery_fee(
+            distance_km=distance_km,
+            priority=request.priority.value
+        )
         courier_fee, platform_fee = calculate_courier_and_platform_fees(fee)
 
         return {
