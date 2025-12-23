@@ -30,7 +30,8 @@
       "Bash(\"/mnt/c/Users/Rahina/Documents/main project/zipo_backend_new/venv/Scripts/python.exe\" -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8080)",
       "Read(//run/resolvconf/**)",
       "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsImtpZCI6IktuSUZtVGRGWVU0NS8xQVciLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2d2emNkeGNxd3F0ZGdjcXF5bHhmLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI1ZmY2YjcxNC04MTBkLTRlZTEtOWQ3OC04NGRmZTYzNWY4NDIiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzY1MjkwMTA3LCJpYXQiOjE3NjUyODY1MDcsImVtYWlsIjoicmhudHNza0BnbWFpbC5jb20iLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImFkZHJlc3MiOiJBZnVhbWFuIiwiY2l0eSI6IkFjY3JhIiwiY291bnRyeSI6IkdoYW5hIiwiZW1haWwiOiJyaG50c3NrQGdtYWlsLmNvbSIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJuYW1lIjoiSGFraW0gTGFycnkiLCJwaG9uZV9udW1iZXIiOiIwMjAxNDk5NDQwIiwicGhvbmVfdmVyaWZpZWQiOmZhbHNlLCJzdWIiOiI1ZmY2YjcxNC04MTBkLTRlZTEtOWQ3OC04NGRmZTYzNWY4NDIiLCJ1c2VyX3R5cGUiOiJDT1VSSUVSIiwidmVyaWZpZWQiOmZhbHNlfSwicm9sZSI6ImF1dGhlbnRpY2F0ZWQiLCJhYWwiOiJhYWwxIiwiYW1yIjpbeyJtZXRob2QiOiJwYXNzd29yZCIsInRpbWVzdGFtcCI6MTc2NTI4NjUwN31dLCJzZXNzaW9uX2lkIjoiNmJlOThhMmItMWJiNC00ZTY1LTljMGMtM2I5NDZjOTQ5ODMzIiwiaXNfYW5vbnltb3VzIjpmYWxzZX0.k4zza8iptnFOVvyl5huRSlF622T-mlrhyEZzUmzD0jw\")",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(\"/mnt/c/Users/Rahina/Documents/main project/zipo_backend_new/venv/Scripts/python.exe\" -m py_compile app/routes/courier.py app/routes/delivery.py)"
     ],
     "deny": [],
     "ask": []

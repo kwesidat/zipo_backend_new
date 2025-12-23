@@ -1,12 +1,18 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.models.courier import CourierSignUpRequest
 from app.database import supabase
 from app.utils.auth_utils import AuthUtils
 from datetime import datetime
+from pydantic import BaseModel
+from typing import Optional
 import random
 import string
+import logging
 
 router = APIRouter()
+security = HTTPBearer()
+logger = logging.getLogger(__name__)
 
 
 def generate_courier_code() -> str:
@@ -194,4 +200,94 @@ async def courier_signup(user_data: CourierSignUpRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal server error: {str(e)}"
+        )
+
+
+# ========== LOCATION UPDATE MODELS ==========
+
+class CourierLocationUpdate(BaseModel):
+    latitude: float
+    longitude: float
+
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get current authenticated user"""
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
+        )
+
+    try:
+        user_data = AuthUtils.verify_supabase_token(credentials.credentials)
+        if not user_data:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token",
+            )
+        return user_data
+    except Exception as e:
+        logger.error(f"Authentication failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication failed"
+        )
+
+
+# ========== UPDATE COURIER LOCATION ==========
+
+@router.post("/update-location")
+async def update_courier_location(
+    location: CourierLocationUpdate,
+    current_user=Depends(get_current_user)
+):
+    """
+    Update courier's live location.
+    This endpoint should be called every 30 seconds by the courier's app
+    to broadcast their current location.
+    """
+    try:
+        user_id = current_user["user_id"]
+        user_type = current_user.get("user_type")
+
+        # Verify user is a courier
+        if user_type != "COURIER":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only couriers can update location",
+            )
+
+        logger.info(f"Updating location for courier {user_id}: lat={location.latitude}, lon={location.longitude}")
+
+        # Update user's latitude and longitude in users table
+        now = datetime.utcnow().isoformat()
+        update_data = {
+            "latitude": location.latitude,
+            "longitude": location.longitude,
+            "updated_at": now
+        }
+
+        user_update = supabase.table("users").update(update_data).eq("user_id", user_id).execute()
+
+        if not user_update.data:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update location"
+            )
+
+        logger.info(f"✅ Location updated for courier {user_id}")
+
+        return {
+            "success": True,
+            "message": "Location updated successfully",
+            "latitude": location.latitude,
+            "longitude": location.longitude,
+            "updated_at": now
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating courier location: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update location"
         )

@@ -567,9 +567,9 @@ async def get_available_deliveries(
     priority: Optional[str] = None,
 ):
     """
-    Get all available deliveries that couriers can accept.
+    Get all available deliveries that couriers can accept within 10-mile radius.
     Shows deliveries with status PENDING (not yet assigned to any courier).
-    Only shows orders where useCourierService = true.
+    Only shows orders where useCourierService = true and within proximity.
     """
     try:
         user_id = current_user["user_id"]
@@ -583,6 +583,40 @@ async def get_available_deliveries(
             )
 
         logger.info(f"Courier {user_id} fetching available deliveries, page {page}")
+
+        # Get courier's current location from users table
+        courier_location_response = (
+            supabase.table("users")
+            .select("latitude, longitude")
+            .eq("user_id", user_id)
+            .execute()
+        )
+
+        if not courier_location_response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Courier profile not found",
+            )
+
+        courier_data = courier_location_response.data[0]
+        courier_lat = courier_data.get("latitude")
+        courier_lon = courier_data.get("longitude")
+
+        # Check if courier has location set
+        if courier_lat is None or courier_lon is None:
+            logger.warning(f"Courier {user_id} has no location set")
+            # Return empty list if courier hasn't broadcasted location yet
+            return AvailableDeliveryListResponse(
+                deliveries=[],
+                total_count=0,
+                page=page,
+                page_size=page_size,
+                total_pages=0,
+                has_next=False,
+                has_previous=False,
+            )
+
+        logger.info(f"Courier location: lat={courier_lat}, lon={courier_lon}")
 
         # Calculate offset
         offset = (page - 1) * page_size
@@ -599,13 +633,18 @@ async def get_available_deliveries(
 
         # Order by priority (URGENT first) and creation date
         query = query.order("priority", desc=True).order("created_at", desc=False)
-        query = query.range(offset, offset + page_size - 1)
+        # Don't apply pagination limit yet - we need to filter by proximity first
 
         response = query.execute()
 
         deliveries_data = response.data or []
 
-        # Filter deliveries to only show those with useCourierService = true and courierServiceStatus != ACCEPTED
+        # Filter deliveries by:
+        # 1. useCourierService = true
+        # 2. courierServiceStatus != ACCEPTED
+        # 3. Within 10-mile (16.09 km) radius from courier's current location
+        RADIUS_KM = 16.09  # 10 miles in kilometers
+
         filtered_deliveries = []
         for delivery in deliveries_data:
             order_data = delivery.get("order")
@@ -614,19 +653,50 @@ async def get_available_deliveries(
             if isinstance(order_data, list):
                 order_data = order_data[0] if order_data else None
 
-            # Only include deliveries where:
-            # 1. order has useCourierService = true
-            # 2. courierServiceStatus is not ACCEPTED (still available)
-            if order_data and order_data.get("useCourierService") == True:
-                courier_status = order_data.get("courierServiceStatus")
-                if courier_status != "ACCEPTED":
-                    filtered_deliveries.append(delivery)
+            # Check order has useCourierService = true and is available
+            if not (order_data and order_data.get("useCourierService") == True):
+                continue
+
+            courier_status = order_data.get("courierServiceStatus")
+            if courier_status == "ACCEPTED":
+                continue
+
+            # Check proximity - calculate distance from courier to pickup location
+            pickup_address = delivery.get("pickup_address", {})
+            pickup_lat = pickup_address.get("latitude")
+            pickup_lon = pickup_address.get("longitude")
+
+            # Skip if pickup location not set
+            if pickup_lat is None or pickup_lon is None:
+                logger.warning(f"Delivery {delivery['id']} has no pickup coordinates")
+                continue
+
+            # Calculate distance using Haversine formula
+            distance_km = calculate_distance(
+                courier_lat, courier_lon,
+                pickup_lat, pickup_lon
+            )
+
+            # Only include deliveries within 10-mile radius
+            if distance_km <= RADIUS_KM:
+                # Add distance info for sorting/display
+                delivery["distance_to_pickup_km"] = round(distance_km, 2)
+                filtered_deliveries.append(delivery)
+                logger.info(f"Delivery {delivery['id']} within range: {distance_km:.2f} km")
+            else:
+                logger.debug(f"Delivery {delivery['id']} out of range: {distance_km:.2f} km > {RADIUS_KM} km")
+
+        # Sort by distance (closest first)
+        filtered_deliveries.sort(key=lambda d: d.get("distance_to_pickup_km", float('inf')))
 
         total_count = len(filtered_deliveries)
 
+        # Apply pagination to filtered results
+        paginated_deliveries = filtered_deliveries[offset:offset + page_size]
+
         # Transform data
         deliveries = []
-        for delivery in filtered_deliveries:
+        for delivery in paginated_deliveries:
             # Fetch order items for this delivery
             order_summary = None
             order_id = delivery["order_id"]
@@ -785,6 +855,28 @@ async def accept_delivery(
         courier = courier_response.data[0]
         courier_id = courier["id"]
 
+        # Check courier's current active deliveries count
+        # Active statuses: ACCEPTED, PICKED_UP, IN_TRANSIT (not PENDING, DELIVERED, CANCELLED, FAILED)
+        active_deliveries_response = (
+            supabase.table("Delivery")
+            .select("id, status")
+            .eq("courier_id", courier_id)
+            .in_("status", ["ACCEPTED", "PICKED_UP", "IN_TRANSIT"])
+            .execute()
+        )
+
+        active_count = len(active_deliveries_response.data) if active_deliveries_response.data else 0
+
+        logger.info(f"Courier {courier_id} has {active_count} active deliveries")
+
+        # Enforce maximum 2 active orders limit
+        MAX_ACTIVE_ORDERS = 2
+        if active_count >= MAX_ACTIVE_ORDERS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot accept delivery. You have reached the maximum limit of {MAX_ACTIVE_ORDERS} active orders. Please complete or cancel existing orders before accepting new ones.",
+            )
+
         # Get delivery
         delivery_response = (
             supabase.table("Delivery")
@@ -800,6 +892,40 @@ async def accept_delivery(
             )
 
         delivery = delivery_response.data[0]
+
+        # Verify delivery is within proximity (10-mile radius)
+        # Get courier's current location
+        courier_user_response = (
+            supabase.table("users")
+            .select("latitude, longitude")
+            .eq("user_id", user_id)
+            .execute()
+        )
+
+        if courier_user_response.data:
+            courier_data = courier_user_response.data[0]
+            courier_lat = courier_data.get("latitude")
+            courier_lon = courier_data.get("longitude")
+
+            pickup_address = delivery.get("pickup_address", {})
+            pickup_lat = pickup_address.get("latitude")
+            pickup_lon = pickup_address.get("longitude")
+
+            # If both courier and pickup locations are available, verify proximity
+            if all([courier_lat, courier_lon, pickup_lat, pickup_lon]):
+                distance_km = calculate_distance(
+                    courier_lat, courier_lon,
+                    pickup_lat, pickup_lon
+                )
+                RADIUS_KM = 16.09  # 10 miles
+
+                if distance_km > RADIUS_KM:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Delivery is out of range. Distance: {distance_km:.2f} km (max {RADIUS_KM} km / 10 miles)",
+                    )
+
+                logger.info(f"Delivery {request.delivery_id} is within range: {distance_km:.2f} km")
 
         # Check if delivery is still available
         if delivery["status"] != "PENDING":
