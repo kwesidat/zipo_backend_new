@@ -258,11 +258,9 @@ async def update_courier_location(
         logger.info(f"Updating location for courier {user_id}: lat={location.latitude}, lon={location.longitude}")
 
         # Update user's latitude and longitude in users table
-        now = datetime.utcnow().isoformat()
         update_data = {
             "latitude": location.latitude,
-            "longitude": location.longitude,
-            "updated_at": now
+            "longitude": location.longitude
         }
 
         user_update = supabase.table("users").update(update_data).eq("user_id", user_id).execute()
@@ -279,8 +277,7 @@ async def update_courier_location(
             "success": True,
             "message": "Location updated successfully",
             "latitude": location.latitude,
-            "longitude": location.longitude,
-            "updated_at": now
+            "longitude": location.longitude
         }
 
     except HTTPException:
