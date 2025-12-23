@@ -602,6 +602,12 @@ async def get_available_deliveries(
         courier_lat = courier_data.get("latitude")
         courier_lon = courier_data.get("longitude")
 
+        # Convert to float if they are strings
+        if courier_lat is not None:
+            courier_lat = float(courier_lat)
+        if courier_lon is not None:
+            courier_lon = float(courier_lon)
+
         # Check if courier has location set
         if courier_lat is None or courier_lon is None:
             logger.warning(f"Courier {user_id} has no location set")
@@ -669,6 +675,14 @@ async def get_available_deliveries(
             # Skip if pickup location not set
             if pickup_lat is None or pickup_lon is None:
                 logger.warning(f"Delivery {delivery['id']} has no pickup coordinates")
+                continue
+
+            # Convert to float if they are strings
+            try:
+                pickup_lat = float(pickup_lat)
+                pickup_lon = float(pickup_lon)
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Delivery {delivery['id']} has invalid pickup coordinates: {e}")
                 continue
 
             # Calculate distance using Haversine formula
