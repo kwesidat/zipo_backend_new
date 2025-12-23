@@ -567,7 +567,7 @@ async def get_available_deliveries(
     priority: Optional[str] = None,
 ):
     """
-    Get all available deliveries that couriers can accept within 10-mile radius.
+    Get all available deliveries that couriers can accept within 5-mile radius.
     Shows deliveries with status PENDING (not yet assigned to any courier).
     Only shows orders where useCourierService = true and within proximity.
     """
@@ -648,8 +648,8 @@ async def get_available_deliveries(
         # Filter deliveries by:
         # 1. useCourierService = true
         # 2. courierServiceStatus != ACCEPTED
-        # 3. Within 10-mile (16.09 km) radius from courier's current location
-        RADIUS_KM = 16.09  # 10 miles in kilometers
+        # 3. Within 5-mile (8.05 km) radius from courier's current location
+        RADIUS_KM = 8.05  # 5 miles in kilometers
 
         filtered_deliveries = []
         for delivery in deliveries_data:
@@ -931,12 +931,12 @@ async def accept_delivery(
                     courier_lat, courier_lon,
                     pickup_lat, pickup_lon
                 )
-                RADIUS_KM = 16.09  # 10 miles
+                RADIUS_KM = 8.05  # 5 miles
 
                 if distance_km > RADIUS_KM:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Delivery is out of range. Distance: {distance_km:.2f} km (max {RADIUS_KM} km / 10 miles)",
+                        detail=f"Delivery is out of range. Distance: {distance_km:.2f} km (max {RADIUS_KM} km / 5 miles)",
                     )
 
                 logger.info(f"Delivery {request.delivery_id} is within range: {distance_km:.2f} km")
