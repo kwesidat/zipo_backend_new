@@ -141,6 +141,7 @@ class AvailableDeliveryResponse(BaseModel):
     delivery_fee: Decimal
     courier_fee: Optional[Decimal]
     distance_km: Optional[float]
+    distance_to_pickup_km: Optional[float] = Field(None, description="Distance from courier to pickup location")
     priority: DeliveryPriority
     scheduled_date: Optional[datetime]
     estimated_pickup_time: Optional[datetime]
@@ -186,6 +187,8 @@ class AvailableDeliveryListResponse(BaseModel):
     total_pages: int
     has_next: bool
     has_previous: bool
+    courier_location: Optional[Dict[str, Any]] = Field(None, description="Courier's current location used for search")
+    search_radius_km: Optional[float] = Field(None, description="Search radius in kilometers")
 
 
 class AddressRequest(BaseModel):

@@ -691,14 +691,14 @@ async def get_available_deliveries(
                 pickup_lat, pickup_lon
             )
 
-            # Only include deliveries within 10-mile radius
+            # Only include deliveries within radius
             if distance_km <= RADIUS_KM:
                 # Add distance info for sorting/display
                 delivery["distance_to_pickup_km"] = round(distance_km, 2)
                 filtered_deliveries.append(delivery)
-                logger.info(f"Delivery {delivery['id']} within range: {distance_km:.2f} km")
+                logger.info(f"Delivery {delivery['id']} within range: {distance_km:.2f} km (pickup at lat={pickup_lat}, lon={pickup_lon})")
             else:
-                logger.debug(f"Delivery {delivery['id']} out of range: {distance_km:.2f} km > {RADIUS_KM} km")
+                logger.info(f"Delivery {delivery['id']} out of range: {distance_km:.2f} km > {RADIUS_KM} km (pickup at lat={pickup_lat}, lon={pickup_lon})")
 
         # Sort by distance (closest first)
         filtered_deliveries.sort(key=lambda d: d.get("distance_to_pickup_km", float('inf')))
@@ -791,6 +791,7 @@ async def get_available_deliveries(
                     delivery_fee=delivery_fee,
                     courier_fee=courier_fee,
                     distance_km=delivery.get("distance_km"),
+                    distance_to_pickup_km=delivery.get("distance_to_pickup_km"),
                     priority=DeliveryPriority(delivery["priority"]),
                     scheduled_date=delivery.get("scheduled_date"),
                     estimated_pickup_time=delivery.get("estimated_pickup_time"),
@@ -807,6 +808,7 @@ async def get_available_deliveries(
         has_previous = page > 1
 
         logger.info(f"✅ Retrieved {len(deliveries)} available deliveries (with useCourierService=true) for courier {user_id}")
+        logger.info(f"📍 Courier location: lat={courier_lat}, lon={courier_lon}, radius={RADIUS_KM}km ({RADIUS_KM/1.609:.1f} miles)")
 
         return AvailableDeliveryListResponse(
             deliveries=deliveries,
@@ -816,6 +818,8 @@ async def get_available_deliveries(
             total_pages=total_pages,
             has_next=has_next,
             has_previous=has_previous,
+            courier_location={"latitude": courier_lat, "longitude": courier_lon} if courier_lat and courier_lon else None,
+            search_radius_km=RADIUS_KM,
         )
 
     except HTTPException:
@@ -927,19 +931,28 @@ async def accept_delivery(
 
             # If both courier and pickup locations are available, verify proximity
             if all([courier_lat, courier_lon, pickup_lat, pickup_lon]):
-                distance_km = calculate_distance(
-                    courier_lat, courier_lon,
-                    pickup_lat, pickup_lon
-                )
-                RADIUS_KM = 8.05  # 5 miles
-
-                if distance_km > RADIUS_KM:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Delivery is out of range. Distance: {distance_km:.2f} km (max {RADIUS_KM} km / 5 miles)",
+                # Convert to float if they are strings
+                try:
+                    courier_lat = float(courier_lat)
+                    courier_lon = float(courier_lon)
+                    pickup_lat = float(pickup_lat)
+                    pickup_lon = float(pickup_lon)
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Invalid coordinates for proximity check: {e}")
+                else:
+                    distance_km = calculate_distance(
+                        courier_lat, courier_lon,
+                        pickup_lat, pickup_lon
                     )
+                    RADIUS_KM = 8.05  # 5 miles
 
-                logger.info(f"Delivery {request.delivery_id} is within range: {distance_km:.2f} km")
+                    if distance_km > RADIUS_KM:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Delivery is out of range. Distance: {distance_km:.2f} km (max {RADIUS_KM} km / 5 miles)",
+                        )
+
+                    logger.info(f"Delivery {request.delivery_id} is within range: {distance_km:.2f} km")
 
         # Check if delivery is still available
         if delivery["status"] != "PENDING":
